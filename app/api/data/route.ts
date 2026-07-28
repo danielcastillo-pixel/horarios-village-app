@@ -22,12 +22,32 @@ function workedHours(start:string|null,end:string|null,counts:boolean) {
   let minutes=eh*60+em-sh*60-sm;if(minutes<0)minutes+=1440;
   return Math.round(minutes/60*100)/100;
 }
+const regionalLocations=[
+  ["MX. Village Plaza","Guayaquil"],["SX. Plaza Batán","Guayaquil"],
+  ["SX. Villa Club","Guayaquil"],["MX. Ceibos","Guayaquil"],
+  ["SX. Ciudad Celeste","Guayaquil"],["MX. City Mall","Guayaquil"],
+  ["MX. Mall del Sol","Guayaquil"],["SX. Vistana","Guayaquil"],
+  ["SX. Vía a la Costa","Guayaquil"],["MX. Mall del Norte","Guayaquil"],
+  ["MX. Mall del Sur","Guayaquil"],["Akí Astillero","Guayaquil"],
+  ["Akí Mapasingue","Guayaquil"],["Akí La Joya","Guayaquil"],
+  ["MX. Wayra","Cuenca"],["SX. Vergel","Cuenca"],
+  ["SX. Don Bosco","Cuenca"],["SX. Chaullabamba","Cuenca"],
+  ["Super Akí Narancay","Cuenca"],["SX. Pradera","Cuenca"],
+  ["MX. Mall del Pacífico","Manta"],["Supermaxi Salinas","Salinas"],
+  ["Akí Pedernales","Pedernales"]
+].map(([name,city])=>({name,city,active:true}));
 
 export async function GET(request:NextRequest) {
   const db=client(request);
   const {data:profile,error:profileError}=await db.from("profiles").select("*").single();
   if(profileError||!profile) return NextResponse.json({error:"Usuario no autorizado"},{status:403});
   if(!profile.active) return NextResponse.json({error:"Usuario pendiente de activación"},{status:403});
+  if(profile.app_role==="admin"){
+    await db.from("locations").update({name:"MX. Village Plaza",city:"Guayaquil"}).eq("name","Village Plaza");
+    await db.from("locations").update({active:false}).in("name",["El Recreo","El Bosque","Quicentro Sur","Quicentro Shopping","Scala Shopping","Condado Shopping"]);
+    const {error:seedError}=await db.from("locations").upsert(regionalLocations,{onConflict:"name"});
+    if(seedError)return NextResponse.json({error:seedError.message},{status:400});
+  }
   const [{data:locations,error:le},{data:roles,error:re},{data:supervisors,error:se},{data:assignments,error:ae}]=await Promise.all([
     db.from("locations").select("*").eq("active",true).order("name"),
     db.from("roles").select("*").eq("active",true).order("name"),
