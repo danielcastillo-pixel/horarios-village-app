@@ -82,6 +82,7 @@ export default function Home() {
   const [reportEnd, setReportEnd] = useState("2026-07-31");
   const [accessState, setAccessState] = useState<"loading"|"authorized"|"signin"|"denied">("loading");
   const [accessUsers, setAccessUsers] = useState<AccessUserRow[]>([]);
+  const [editAccessUser, setEditAccessUser] = useState<AccessUserRow | null>(null);
 
   const dateKeys = useMemo(() => Array.from({length:7},(_,i) => {
     const d = new Date(`${weekStart}T12:00:00`);
@@ -337,6 +338,25 @@ ${detailRows.map(values=>row(values,[6])).join("")}
     }
   }
 
+  async function updateAccessUser(form:FormData) {
+    if (!editAccessUser) return;
+    const response = await apiFetch("/api/access",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
+      action:"update",
+      id:editAccessUser.id,
+      name:String(form.get("name") ?? "").trim(),
+      locationId:Number(form.get("locationId")),
+      active:Number(form.get("active"))
+    })});
+    if (response.ok) {
+      setEditAccessUser(null);
+      setNotice("✓ Usuario y local actualizados correctamente");
+      await loadAccessUsers();
+    } else {
+      const problem = await response.json().catch(()=>({error:"No se pudo actualizar"})) as {error?:string};
+      setNotice(`Error: ${problem.error ?? "No se pudo actualizar"}`);
+    }
+  }
+
   async function submitLogin(event:React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); setLoginError("");
     if (registering) {
@@ -433,10 +453,13 @@ ${detailRows.map(values=>row(values,[6])).join("")}
             <button className="primary">＋ Registrar usuario</button>
           </form>
           <div className="access-list">
-            <div className="access-row access-head"><span>Usuario</span><span>Correo</span><span>Local permitido</span><span>Acceso</span></div>
+            <div className="access-row access-head"><span>Usuario</span><span>Correo</span><span>Local permitido</span><span>Acciones</span></div>
             {accessUsers.length ? accessUsers.map(user=><div className="access-row" key={user.id}>
               <strong>{user.name}</strong><span>{user.email}</span><span>{user.location_name}</span>
-              <button className={user.active===1?"access-active":"access-blocked"} onClick={()=>void toggleAccessUser(user)}>{user.active===1?"Activo · Bloquear":"Bloqueado · Reactivar"}</button>
+              <div className="access-actions">
+                <button className="access-edit" onClick={()=>setEditAccessUser(user)}>Editar</button>
+                <button className={user.active===1?"access-active":"access-blocked"} onClick={()=>void toggleAccessUser(user)}>{user.active===1?"Bloquear":"Reactivar"}</button>
+              </div>
             </div>) : <div className="empty-report">Todavía no has registrado supervisores con acceso.</div>}
           </div>
         </section>}
@@ -445,6 +468,16 @@ ${detailRows.map(values=>row(values,[6])).join("")}
       </section>
 
       {notice && <button className="toast" onClick={() => setNotice("")}>{notice} ×</button>}
+      {editAccessUser && <div className="modal-backdrop" onMouseDown={()=>setEditAccessUser(null)}><form className="modal access-editor" onSubmit={e=>{e.preventDefault();void updateAccessUser(new FormData(e.currentTarget));}} onMouseDown={e=>e.stopPropagation()}>
+        <button type="button" className="close" onClick={()=>setEditAccessUser(null)}>×</button>
+        <span className="modal-kicker">EDITAR ACCESO</span>
+        <h2>{editAccessUser.name}</h2>
+        <p>{editAccessUser.email}</p>
+        <label>Nombre completo<input name="name" required defaultValue={editAccessUser.name} /></label>
+        <label>Local asignado<select name="locationId" required defaultValue={editAccessUser.location_id || ""}><option value="" disabled>Seleccionar local</option>{data?.locations.map(l=><option key={l.id} value={l.id}>{l.name} · {l.city}</option>)}</select></label>
+        <label>Estado<select name="active" defaultValue={editAccessUser.active}><option value={1}>Activo</option><option value={0}>Bloqueado</option></select></label>
+        <button className="primary save">Guardar cambios</button>
+      </form></div>}
       {modal && <div className="modal-backdrop" onMouseDown={() => setModal(null)}><form className="modal" onSubmit={e => {e.preventDefault(); saveShift(new FormData(e.currentTarget));}} onMouseDown={e => e.stopPropagation()}>
         <button type="button" className="close" onClick={() => setModal(null)}>×</button>
         <span className="modal-kicker">EDITAR ASIGNACIÓN</span><h2>{modal.person.name}</h2><p>{days[modal.day]} · {modal.person.location}</p>
