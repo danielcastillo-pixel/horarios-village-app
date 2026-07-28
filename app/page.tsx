@@ -101,7 +101,7 @@ export default function Home() {
   async function apiFetch(path:string, init:RequestInit = {}) {
     const {data:{session}} = await supabase.auth.getSession();
     const headers = new Headers(init.headers);
-    if (session?.access_token) headers.set("authorization",`Bearer ${session.access_token}`);
+    if (session?.access_token) headers.set("x-supabase-token",session.access_token);
     return fetch(path,{...init,headers});
   }
 
