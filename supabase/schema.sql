@@ -116,9 +116,17 @@ with check (exists(select 1 from supervisors s where s.id=supervisor_id
   and (public.is_admin() or s.location_id=public.my_location())));
 
 insert into public.locations(name,city) values
-('Village Plaza','Quito'),('El Recreo','Quito'),('El Bosque','Quito'),
-('Quicentro Sur','Quito'),('Quicentro Shopping','Quito'),
-('Scala Shopping','Quito'),('Condado Shopping','Quito')
+('MX. Village Plaza','Guayaquil'),('SX. Plaza Batán','Guayaquil'),
+('SX. Villa Club','Guayaquil'),('MX. Ceibos','Guayaquil'),
+('SX. Ciudad Celeste','Guayaquil'),('MX. City Mall','Guayaquil'),
+('MX. Mall del Sol','Guayaquil'),('SX. Vistana','Guayaquil'),
+('SX. Vía a la Costa','Guayaquil'),('MX. Mall del Norte','Guayaquil'),
+('MX. Mall del Sur','Guayaquil'),('Akí Astillero','Guayaquil'),
+('Akí Mapasingue','Guayaquil'),('Akí La Joya','Guayaquil'),
+('MX. Wayra','Cuenca'),('SX. Vergel','Cuenca'),('SX. Don Bosco','Cuenca'),
+('SX. Chaullabamba','Cuenca'),('Super Akí Narancay','Cuenca'),
+('SX. Pradera','Cuenca'),('MX. Mall del Pacífico','Manta'),
+('Supermaxi Salinas','Salinas'),('Akí Pedernales','Pedernales')
 on conflict (name) do nothing;
 
 insert into public.roles(name,color,counts_hours) values
@@ -132,5 +140,5 @@ on conflict (name) do nothing;
 
 insert into public.supervisors(name,location_id)
 select v.name,l.id from (values ('Axel'),('Gia'),('Henry'),('Jean C.'),('Viviana'),('Melany')) v(name)
-cross join lateral (select id from public.locations where name='Village Plaza') l
+cross join lateral (select id from public.locations where name='MX. Village Plaza') l
 where not exists(select 1 from public.supervisors s where s.name=v.name and s.location_id=l.id);
