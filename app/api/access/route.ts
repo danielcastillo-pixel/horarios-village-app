@@ -9,20 +9,22 @@ function client(request:NextRequest) {
 }
 export async function GET(request:NextRequest) {
   const db=client(request);
-  const [{data,error},{data:grants,error:grantsError}]=await Promise.all([
-    db.from("profiles").select("*,locations(name)").order("email"),
-    db.from("profile_locations").select("profile_id,location_id,locations(name)")
+  const [{data,error},{data:grants,error:grantsError},{data:locations}]=await Promise.all([
+    db.from("profiles").select("*").order("email"),
+    db.from("profile_locations").select("profile_id,location_id"),
+    db.from("locations").select("id,name")
   ]);
   if(error)return NextResponse.json({error:error.message},{status:403});
   const safeGrants=grantsError?[]:(grants||[]);
+  const locationNameById=new Map((locations||[]).map((location:any)=>[Number(location.id),location.name]));
   return NextResponse.json({users:(data||[]).filter((x:any)=>x.app_role!=="admin").map((x:any)=>({
     id:x.id,email:x.email,name:x.full_name||x.email,role:x.app_role,location_id:x.location_id,
-    location_name:x.locations?.name||"Sin asignar",
+    location_name:locationNameById.get(Number(x.location_id))||"Sin asignar",
     location_ids:safeGrants.filter((g:any)=>g.profile_id===x.id).map((g:any)=>g.location_id).concat(
       safeGrants.some((g:any)=>g.profile_id===x.id)||!x.location_id?[]:[x.location_id]
     ),
-    location_names:safeGrants.filter((g:any)=>g.profile_id===x.id).map((g:any)=>g.locations?.name).filter(Boolean).concat(
-      safeGrants.some((g:any)=>g.profile_id===x.id)||!x.locations?.name?[]:[x.locations.name]
+    location_names:safeGrants.filter((g:any)=>g.profile_id===x.id).map((g:any)=>locationNameById.get(Number(g.location_id))).filter(Boolean).concat(
+      safeGrants.some((g:any)=>g.profile_id===x.id)||!x.location_id?[]:[locationNameById.get(Number(x.location_id))]
     ),
     active:x.active?1:0
   }))});
