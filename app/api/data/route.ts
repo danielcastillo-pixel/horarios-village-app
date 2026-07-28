@@ -45,6 +45,8 @@ export async function GET(request:NextRequest) {
   const {data:profile,error:profileError}=await db.from("profiles").select("*").eq("id",user.id).single();
   if(profileError||!profile) return NextResponse.json({error:"Usuario no autorizado"},{status:403});
   if(!profile.active) return NextResponse.json({error:"Usuario pendiente de activación"},{status:403});
+  const {data:locationGrants}=await db.from("profile_locations").select("location_id").eq("profile_id",user.id);
+  const locationIds=(locationGrants||[]).map((x:any)=>Number(x.location_id));
   if(profile.app_role==="admin"){
     await db.from("locations").update({name:"MX. Village Plaza",city:"Guayaquil"}).eq("name","Village Plaza");
     await db.from("locations").update({active:false}).in("name",["El Recreo","El Bosque","Quicentro Sur","Quicentro Shopping","Scala Shopping","Condado Shopping"]);
@@ -63,7 +65,7 @@ export async function GET(request:NextRequest) {
     roles:(roles||[]).map((x:any)=>({...x,color:tone(x.color,x.name),active:x.active?1:0})),
     supervisors:(supervisors||[]).map((x:any)=>({...x,location_name:x.locations?.name||"",city:x.locations?.city||"",active:x.active?1:0})),
     assignments:(assignments||[]).map((x:any)=>({...x,role_name:x.roles?.name||"",color:tone(x.roles?.color||"",x.roles?.name||""),hours:workedHours(x.start_time,x.end_time,x.roles?.counts_hours!==false)})),
-    currentUser:{email:profile.email,name:profile.full_name||profile.email,role:profile.app_role,locationId:profile.location_id}
+    currentUser:{email:profile.email,name:profile.full_name||profile.email,role:profile.app_role,locationId:profile.location_id,locationIds}
   });
 }
 
