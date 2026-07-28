@@ -245,6 +245,23 @@ ${detailRows.map(values=>row(values,[6])).join("")}
     setModal(null);
   }
 
+  async function copyWeek() {
+    const selectedLocation=data?.locations.find(l=>l.name===location);
+    if(!selectedLocation){setNotice("Selecciona un local antes de copiar la semana");return;}
+    const target=new Date(`${weekStart}T12:00:00`);
+    target.setDate(target.getDate()+7);
+    if(target>new Date("2026-12-31T12:00:00")){setNotice("No se puede copiar fuera del período disponible");return;}
+    if(!window.confirm(`¿Copiar todos los turnos de ${location} a la semana siguiente?`))return;
+    const response=await apiFetch("/api/data",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
+      action:"copyWeek",locationId:selectedLocation.id,sourceStart:weekStart,targetStart:target.toISOString().slice(0,10)
+    })});
+    const result=await response.json().catch(()=>({error:"No se pudo copiar la semana"})) as {ok?:boolean;copied?:number;error?:string};
+    if(!response.ok){setNotice(`Error: ${result.error??"No se pudo copiar la semana"}`);return;}
+    setWeekStart(target.toISOString().slice(0,10));
+    setNotice(`✓ Semana copiada correctamente (${result.copied??0} turnos)`);
+    await loadData();
+  }
+
   function changeWeek(offset:number) {
     const d = new Date(`${weekStart}T12:00:00`);
     d.setDate(d.getDate()+offset*7);
@@ -396,7 +413,7 @@ ${detailRows.map(values=>row(values,[6])).join("")}
       <section className="workspace">
         <header>
           <div><p className="eyebrow">CONTROL OPERATIVO REGIONAL</p><h1>{active}</h1><p>Planificación y control semanal de supervisión</p></div>
-          <div className="header-actions"><button className="secondary" onClick={() => window.print()}>⇩ Exportar</button><button className="primary" onClick={() => {setActive("Horarios");setNotice("Selecciona una semana y agrega los turnos en las celdas vacías");}}>＋ Nuevo horario</button></div>
+          <div className="header-actions"><button className="secondary" onClick={() => window.print()}>⇩ Exportar</button><button className="primary" onClick={() => {setActive("Horarios");if(!people.length)setCreate("supervisor");else setNotice("Selecciona una celda para crear o modificar un turno");}}>＋ Nuevo horario</button></div>
         </header>
 
         <section className="kpis">
@@ -407,7 +424,7 @@ ${detailRows.map(values=>row(values,[6])).join("")}
         </section>
 
         {(active === "Panel general" || active === "Horarios") && <section className="schedule-card">
-          <div className="schedule-title"><div><h2>Horario semanal</h2><p>{isAdmin?"Haz clic en el nombre para editar al supervisor o en cualquier turno para modificarlo":"Puedes modificar únicamente los turnos del local que tienes asignado"}</p></div><div className="schedule-actions">{isAdmin && <button className="copy" onClick={() => setCreate("supervisor")}>＋ Agregar fila</button>}<button className="copy" onClick={() => setNotice("Usa la siguiente semana y completa o ajusta sus turnos")}>▣ Copiar semana</button></div></div>
+          <div className="schedule-title"><div><h2>Horario semanal</h2><p>{isAdmin?"Haz clic en el nombre para editar al supervisor o en cualquier turno para modificarlo":"Puedes crear y modificar los horarios de tus locales asignados"}</p></div><div className="schedule-actions"><button className="copy" onClick={() => setCreate("supervisor")}>＋ Agregar fila</button><button className="copy" onClick={()=>void copyWeek()}>▣ Copiar semana</button></div></div>
           <div className="toolbar">
             <div className="week"><button aria-label="Semana anterior" onClick={() => changeWeek(-1)}>‹</button><strong>{weekLabel}</strong><button aria-label="Semana siguiente" onClick={() => changeWeek(1)}>›</button></div>
             <select value={location} onChange={e => setLocation(e.target.value)}>{isAdmin && <option>Todos los locales</option>}{(data?.locations.map(l => l.name) ?? locations.slice(1)).map(l => <option key={l}>{l}</option>)}</select>
