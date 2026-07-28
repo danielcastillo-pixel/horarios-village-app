@@ -360,6 +360,7 @@ ${detailRows.map(values=>row(values,[6])).join("")}
         <div className="brand"><span>TIPTI · OPERACIONES</span><strong>Región Intercity</strong></div>
         <nav>{visibleNav.map(([icon,label]) => <button key={label} className={active === label ? "active" : ""} onClick={() => setActive(label)}><i>{icon}</i>{label}</button>)}</nav>
         <div className="profile"><div className="avatar admin">{data?.currentUser.name.split(" ").map(x=>x[0]).join("").slice(0,2).toUpperCase()}</div><div><strong>{data?.currentUser.name}</strong><span>{isAdmin?"Administrador total":"Supervisor de local"}</span></div></div>
+        <button className="logout" onClick={() => void supabase.auth.signOut()}>↪ Cerrar sesión</button>
         {isAdmin && <button className="settings" onClick={() => setActive("Configuración")}>⚙ Configuración</button>}
       </aside>
 
