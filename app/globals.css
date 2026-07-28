@@ -105,7 +105,10 @@ th:first-child { z-index:2; background:#fbfcfd; padding-left:12px; }
   .workspace{padding:76px 15px 40px}
   header{align-items:flex-start}header h1{font-size:26px}.header-actions .secondary{display:none}.primary{padding:11px 13px}
   .kpis{grid-template-columns:1fr 1fr;gap:10px}.kpis article{min-height:112px;padding:15px}.kpis strong{font-size:25px;margin:12px 0 5px}
-  .toolbar{flex-wrap:wrap}.toolbar input,.toolbar select{min-width:100%;width:100%}.schedule-title{align-items:flex-start}.copy{display:none}
+  .toolbar{flex-wrap:wrap}.toolbar input,.toolbar select{min-width:100%;width:100%}
+  .schedule-title{align-items:flex-start;flex-direction:column;gap:14px}
+  .schedule-actions{display:grid;grid-template-columns:1fr 1fr;width:100%;gap:8px}
+  .schedule-actions .copy{display:block;width:100%;padding:11px 8px;font-size:12px}
   .table-wrap{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
   .cards-grid,.directory,.role-grid,.settings-grid{grid-template-columns:1fr}.management-card{padding:17px}.management-head{align-items:flex-start}
   .report-filters{grid-template-columns:1fr}.report-note{flex-wrap:wrap}.report-row{grid-template-columns:1fr .6fr}.report-row span:nth-child(2),.report-row strong:nth-child(2){display:none}
