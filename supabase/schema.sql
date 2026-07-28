@@ -131,6 +131,10 @@ using (public.is_admin() or public.has_location(location_id));
 drop policy if exists supervisors_admin on public.supervisors;
 create policy supervisors_admin on public.supervisors for all to authenticated
 using (public.is_admin()) with check (public.is_admin());
+drop policy if exists supervisors_assigned_write on public.supervisors;
+create policy supervisors_assigned_write on public.supervisors for all to authenticated
+using (public.has_location(location_id))
+with check (public.has_location(location_id));
 
 drop policy if exists assignments_read on public.assignments;
 create policy assignments_read on public.assignments for select to authenticated
