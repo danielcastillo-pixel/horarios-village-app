@@ -13,6 +13,8 @@ type AssignmentRow = { id:number; supervisor_id:number; work_date:string; start_
 type CurrentUser = { email:string; name:string; role:"admin"|"supervisor"; locationId:number|null; locationIds:number[] };
 type DataSet = { locations:LocationRow[]; roles:RoleRow[]; supervisors:SupervisorRow[]; assignments:AssignmentRow[]; currentUser:CurrentUser };
 type AccessUserRow = { id:number; email:string; name:string; role:string; location_id:number; location_name:string; location_ids:number[]; location_names:string[]; active:number };
+type ShopperRow={id:number;name:string;category:"purchase"|"delivery";employment_type:string;location_id:number;location_name:string;active:number};
+type ShopperTurnRow={id:number;staff_id:number;work_date:string;turn_code:string};
 
 const locations = [
   "Todos los locales", "MX. Village Plaza", "SX. Plaza Batán", "SX. Villa Club",
@@ -26,9 +28,9 @@ const locations = [
 const shift = (time: string, role: string, tone: Shift["tone"]): Shift => ({ time, role, tone });
 const adminNav = [
   ["▦", "Panel general"], ["▣", "Horarios"], ["♙", "Supervisores"],
-  ["◫", "Turnos y roles"], ["⌂", "Locales"], ["▥", "Reportes"], ["⚿", "Accesos"]
+  ["◫", "Turnos y roles"], ["♟", "Shoppers"], ["⌂", "Locales"], ["▥", "Reportes"], ["⚿", "Accesos"]
 ];
-const supervisorNav = [["▣", "Horarios"],["▥", "Reportes"]];
+const supervisorNav = [["▣", "Horarios"],["♟", "Shoppers"],["▥", "Reportes"]];
 
 function hoursFor(person: Person) {
   return Math.round(person.shifts.reduce((total, item) => total + shiftHours(item), 0) * 100) / 100;
@@ -86,6 +88,11 @@ export default function Home() {
   const [editAccessUser, setEditAccessUser] = useState<AccessUserRow | null>(null);
   const [editAccessLocations, setEditAccessLocations] = useState<number[]>([]);
   const scheduleRef=useRef<HTMLElement|null>(null);
+  const [shopperCategory,setShopperCategory]=useState<"purchase"|"delivery">("purchase");
+  const [shopperStaff,setShopperStaff]=useState<ShopperRow[]>([]);
+  const [shopperTurns,setShopperTurns]=useState<ShopperTurnRow[]>([]);
+  const [shopperModal,setShopperModal]=useState<{staff:ShopperRow;date:string}|null>(null);
+  const [addShopper,setAddShopper]=useState(false);
 
   const dateKeys = useMemo(() => Array.from({length:7},(_,i) => {
     const d = new Date(`${weekStart}T12:00:00`);
@@ -145,6 +152,7 @@ export default function Home() {
   useEffect(() => {
     if (active === "Accesos" && data?.currentUser.role === "admin") void loadAccessUsers();
   },[active,data?.currentUser.role]);
+  useEffect(()=>{if(active==="Shoppers")void loadShoppers();},[active,shopperCategory]);
   useEffect(() => {
     if (!data) return;
     setPeople(data.supervisors.filter(s => s.active === 1).map(s => ({
@@ -373,6 +381,45 @@ ${detailRows.map(values=>row(values,[6])).join("")}
     setAccessUsers(payload.users);
   }
 
+  async function loadShoppers(){
+    const response=await apiFetch(`/api/shoppers?category=${shopperCategory}`);
+    if(!response.ok){const p=await response.json().catch(()=>({error:"No disponible"}));setNotice(`Error: ${p.error}`);return;}
+    const payload=await response.json() as {staff:ShopperRow[];turns:ShopperTurnRow[]};
+    setShopperStaff(payload.staff);setShopperTurns(payload.turns);
+  }
+
+  async function createShopper(form:FormData){
+    const selected=data?.locations.find(l=>l.name===location)??data?.locations[0];
+    if(!selected){setNotice("Selecciona un local");return;}
+    const response=await apiFetch("/api/shoppers",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
+      action:"addStaff",name:form.get("name"),employmentType:form.get("employmentType"),category:shopperCategory,locationId:selected.id
+    })});
+    const result=await response.json().catch(()=>({error:"No se pudo guardar"}));
+    if(!response.ok){setNotice(`Error: ${result.error}`);return;}
+    setAddShopper(false);setNotice("✓ Persona agregada al horario");await loadShoppers();
+  }
+
+  async function saveShopperTurn(code:string){
+    if(!shopperModal)return;
+    const response=await apiFetch("/api/shoppers",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
+      action:"saveTurn",staffId:shopperModal.staff.id,workDate:shopperModal.date,turnCode:code
+    })});
+    const result=await response.json().catch(()=>({error:"No se pudo guardar"}));
+    if(!response.ok){setNotice(`Error: ${result.error}`);return;}
+    setShopperModal(null);setNotice("✓ Turno guardado");await loadShoppers();
+  }
+
+  async function copyShopperWeek(){
+    const selected=data?.locations.find(l=>l.name===location)??data?.locations[0];
+    if(!selected){setNotice("Selecciona un local");return;}
+    const response=await apiFetch("/api/shoppers",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
+      action:"copyWeek",category:shopperCategory,locationId:selected.id,sourceStart:weekStart
+    })});
+    const result=await response.json().catch(()=>({error:"No se pudo copiar"}));
+    if(!response.ok){setNotice(`Error: ${result.error}`);return;}
+    changeWeek(1);setNotice(`✓ ${result.copied} turnos copiados`);await loadShoppers();
+  }
+
   async function saveAccessUser(form: FormData) {
     const response = await apiFetch("/api/access",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
       action:"save",name:form.get("name"),email:form.get("email"),locationIds:form.getAll("locationIds").map(Number)
@@ -476,6 +523,13 @@ ${detailRows.map(values=>row(values,[6])).join("")}
           </table></div>
         </section>}
 
+        {active==="Shoppers"&&<section className="schedule-card shopper-schedule">
+          <div className="schedule-title"><div><h2>Horario de shoppers</h2><p>Programación por turnos del personal de tus locales asignados.</p></div><div className="schedule-actions"><button className="schedule-action-button" onClick={()=>setAddShopper(true)}>＋ Agregar fila</button><button className="schedule-action-button" onClick={()=>void copyShopperWeek()}>▣ Copiar semana</button></div></div>
+          <div className="shopper-submenu"><button className={shopperCategory==="purchase"?"active":""} onClick={()=>setShopperCategory("purchase")}>Asesores de compra</button><button className={shopperCategory==="delivery"?"active":""} onClick={()=>setShopperCategory("delivery")}>Repartidores</button></div>
+          <div className="toolbar"><div className="week"><button onClick={()=>changeWeek(-1)}>‹</button><strong>{weekLabel}</strong><button onClick={()=>changeWeek(1)}>›</button></div><select value={location} onChange={e=>setLocation(e.target.value)}>{isAdmin&&<option>Todos los locales</option>}{data?.locations.map(l=><option key={l.id}>{l.name}</option>)}</select></div>
+          {(()=>{const visible=shopperStaff.filter(s=>location==="Todos los locales"||s.location_name===location);const codes=visible.flatMap(s=>dateKeys.map(d=>shopperTurns.find(t=>t.staff_id===s.id&&t.work_date===d)?.turn_code).filter(Boolean) as string[]);return <><div className="turn-kpis"><article><strong>{visible.length}</strong><span>Personal</span></article><article><strong>{codes.filter(c=>["A","A2","I","N"].includes(c)).length}</strong><span>Aperturas</span></article><article><strong>{codes.filter(c=>c==="B").length}</strong><span>Intermedios</span></article><article><strong>{codes.filter(c=>c==="T").length}</strong><span>Cierres</span></article><article><strong>{codes.filter(c=>c==="L").length}</strong><span>Libres</span></article></div><div className="table-wrap"><table><thead><tr><th>{shopperCategory==="purchase"?"Asesor de compra":"Repartidor"}</th>{days.map(d=><th key={d}>{d}</th>)}<th>Aperturas</th><th>Cierres</th></tr></thead><tbody>{visible.map(staff=>{const weekly=dateKeys.map(d=>shopperTurns.find(t=>t.staff_id===staff.id&&t.work_date===d)?.turn_code||"");return <tr key={staff.id}><td><div className="person"><span className="avatar">{staff.name.split(" ").map(x=>x[0]).join("").slice(0,2)}</span><div className="person-info"><strong>{staff.name}</strong><small>{staff.employment_type} · {staff.location_name}</small></div></div></td>{dateKeys.map((d,i)=><td key={d}><button className={`turn-code turn-${weekly[i]||"empty"}`} onClick={()=>setShopperModal({staff,date:d})}>{weekly[i]||"＋"}</button></td>)}<td className="hours">{weekly.filter(c=>["A","A2","I","N"].includes(c)).length}</td><td className="hours">{weekly.filter(c=>c==="T").length}</td></tr>})}</tbody></table></div></>})()}
+        </section>}
+
         {active === "Locales" && <section className="management-card">
           <div className="management-head"><div><h2>Locales de la región</h2><p>Todos los puntos forman parte de la nómina regional.</p></div><button className="primary" onClick={() => setCreate("location")}>＋ Agregar local</button></div>
           <div className="cards-grid">{(data?.locations ?? []).map(l => <article key={l.id}><span className="entity-icon">⌂</span><div><strong>{l.name}</strong><p>{l.city}</p></div><span className="status">Activo</span></article>)}</div>
@@ -526,6 +580,8 @@ ${detailRows.map(values=>row(values,[6])).join("")}
       </section>
 
       {notice && <button className="toast" onClick={() => setNotice("")}>{notice} ×</button>}
+      {addShopper&&<div className="modal-backdrop" onMouseDown={()=>setAddShopper(false)}><form className="modal" onSubmit={e=>{e.preventDefault();void createShopper(new FormData(e.currentTarget));}} onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" onClick={()=>setAddShopper(false)}>×</button><span className="modal-kicker">AGREGAR FILA</span><h2>{shopperCategory==="purchase"?"Nuevo asesor de compra":"Nuevo repartidor"}</h2><p>Se agregará al local seleccionado en el horario.</p><label>Nombre completo<input name="name" required /></label><label>Tipo<select name="employmentType"><option>Interno</option><option>Externo</option><option>Full service</option>{shopperCategory==="purchase"&&<option>Shopper cobrador</option>}</select></label><button className="primary save">Guardar</button></form></div>}
+      {shopperModal&&<div className="modal-backdrop" onMouseDown={()=>setShopperModal(null)}><div className="modal turn-modal" onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" onClick={()=>setShopperModal(null)}>×</button><span className="modal-kicker">ASIGNAR TURNO</span><h2>{shopperModal.staff.name}</h2><p>{shopperModal.date} · {shopperModal.staff.location_name}</p><div className="turn-options">{["A","A2","B","T","I","N","L","V"].map(code=><button key={code} onClick={()=>void saveShopperTurn(code)}><strong>{code}</strong><span>{["A","A2","I","N"].includes(code)?"Apertura":code==="T"?"Cierre":code==="B"?"Intermedio":code==="L"?"Libre":"Vacaciones"}</span></button>)}</div></div></div>}
       {editAccessUser && <div className="modal-backdrop" onMouseDown={()=>setEditAccessUser(null)}><form className="modal access-editor" onSubmit={e=>{e.preventDefault();void updateAccessUser(new FormData(e.currentTarget));}} onMouseDown={e=>e.stopPropagation()}>
         <button type="button" className="close" onClick={()=>setEditAccessUser(null)}>×</button>
         <span className="modal-kicker">EDITAR ACCESO</span>
