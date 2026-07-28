@@ -39,7 +39,8 @@ const regionalLocations=[
 
 export async function GET(request:NextRequest) {
   const db=client(request);
-  const {data:{user},error:userError}=await db.auth.getUser();
+  const token=request.headers.get("x-supabase-token")||"";
+  const {data:{user},error:userError}=await db.auth.getUser(token);
   if(userError||!user) return NextResponse.json({error:"Sesión no válida"},{status:401});
   const {data:profile,error:profileError}=await db.from("profiles").select("*").eq("id",user.id).single();
   if(profileError||!profile) return NextResponse.json({error:"Usuario no autorizado"},{status:403});
