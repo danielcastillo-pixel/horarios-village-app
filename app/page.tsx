@@ -9,9 +9,9 @@ type LocationRow = { id:number; name:string; city:string; active:number };
 type RoleRow = { id:number; name:string; color:Shift["tone"] | "purple"; active:number };
 type SupervisorRow = { id:number; name:string; location_id:number; location_name:string; city:string; active:number };
 type AssignmentRow = { id:number; supervisor_id:number; work_date:string; start_time:string|null; end_time:string|null; role_id:number; role_name:string; color:Shift["tone"]; hours:number };
-type CurrentUser = { email:string; name:string; role:"admin"|"supervisor"; locationId:number|null };
+type CurrentUser = { email:string; name:string; role:"admin"|"supervisor"; locationId:number|null; locationIds:number[] };
 type DataSet = { locations:LocationRow[]; roles:RoleRow[]; supervisors:SupervisorRow[]; assignments:AssignmentRow[]; currentUser:CurrentUser };
-type AccessUserRow = { id:number; email:string; name:string; role:string; location_id:number; location_name:string; active:number };
+type AccessUserRow = { id:number; email:string; name:string; role:string; location_id:number; location_name:string; location_ids:number[]; location_names:string[]; active:number };
 
 const locations = [
   "Todos los locales", "MX. Village Plaza", "SX. Plaza Batán", "SX. Villa Club",
@@ -83,6 +83,7 @@ export default function Home() {
   const [accessState, setAccessState] = useState<"loading"|"authorized"|"signin"|"denied">("loading");
   const [accessUsers, setAccessUsers] = useState<AccessUserRow[]>([]);
   const [editAccessUser, setEditAccessUser] = useState<AccessUserRow | null>(null);
+  const [editAccessLocations, setEditAccessLocations] = useState<number[]>([]);
 
   const dateKeys = useMemo(() => Array.from({length:7},(_,i) => {
     const d = new Date(`${weekStart}T12:00:00`);
@@ -317,7 +318,7 @@ ${detailRows.map(values=>row(values,[6])).join("")}
 
   async function saveAccessUser(form: FormData) {
     const response = await apiFetch("/api/access",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
-      action:"save",name:form.get("name"),email:form.get("email"),locationId:Number(form.get("locationId"))
+      action:"save",name:form.get("name"),email:form.get("email"),locationIds:form.getAll("locationIds").map(Number)
     })});
     if (response.ok) {
       setNotice("✓ Usuario registrado como supervisor");
@@ -344,7 +345,7 @@ ${detailRows.map(values=>row(values,[6])).join("")}
       action:"update",
       id:editAccessUser.id,
       name:String(form.get("name") ?? "").trim(),
-      locationId:Number(form.get("locationId")),
+      locationIds:editAccessLocations,
       active:Number(form.get("active"))
     })});
     if (response.ok) {
@@ -405,7 +406,7 @@ ${detailRows.map(values=>row(values,[6])).join("")}
           <div className="schedule-title"><div><h2>Horario semanal</h2><p>{isAdmin?"Haz clic en el nombre para editar al supervisor o en cualquier turno para modificarlo":"Puedes modificar únicamente los turnos del local que tienes asignado"}</p></div><div className="schedule-actions">{isAdmin && <button className="copy" onClick={() => setCreate("supervisor")}>＋ Agregar fila</button>}<button className="copy" onClick={() => setNotice("Usa la siguiente semana y completa o ajusta sus turnos")}>▣ Copiar semana</button></div></div>
           <div className="toolbar">
             <div className="week"><button aria-label="Semana anterior" onClick={() => changeWeek(-1)}>‹</button><strong>{weekLabel}</strong><button aria-label="Semana siguiente" onClick={() => changeWeek(1)}>›</button></div>
-            <select value={location} disabled={!isAdmin} onChange={e => setLocation(e.target.value)}>{isAdmin && <option>Todos los locales</option>}{(data?.locations.map(l => l.name) ?? locations.slice(1)).map(l => <option key={l}>{l}</option>)}</select>
+            <select value={location} onChange={e => setLocation(e.target.value)}>{isAdmin && <option>Todos los locales</option>}{(data?.locations.map(l => l.name) ?? locations.slice(1)).map(l => <option key={l}>{l}</option>)}</select>
             <input aria-label="Buscar supervisor" placeholder="⌕  Buscar supervisor..." value={query} onChange={e => setQuery(e.target.value)} />
           </div>
           <div className="table-wrap"><table>
@@ -436,7 +437,7 @@ ${detailRows.map(values=>row(values,[6])).join("")}
         {active === "Reportes" && <section className="management-card">
           <div className="management-head"><div><h2>Reporte de horarios por local</h2><p>Selecciona el local y cualquier rango de fechas para generar el archivo de Excel.</p></div><button className="primary" onClick={downloadExcelReport}>⇩ Generar Excel</button></div>
           <div className="report-filters">
-            <label>Local<select value={reportLocation} disabled={!isAdmin} onChange={e=>setReportLocation(e.target.value)}>{isAdmin && <option value="">Seleccionar local</option>}{data?.locations.map(l=><option key={l.id} value={l.name}>{l.name} · {l.city}</option>)}</select></label>
+            <label>Local<select value={reportLocation} onChange={e=>setReportLocation(e.target.value)}>{isAdmin && <option value="">Seleccionar local</option>}{data?.locations.map(l=><option key={l.id} value={l.name}>{l.name} · {l.city}</option>)}</select></label>
             <label>Desde<input type="date" min="2026-07-27" max="2026-12-31" value={reportStart} onChange={e=>setReportStart(e.target.value)} /></label>
             <label>Hasta<input type="date" min="2026-07-27" max="2026-12-31" value={reportEnd} onChange={e=>setReportEnd(e.target.value)} /></label>
           </div>
@@ -449,15 +450,15 @@ ${detailRows.map(values=>row(values,[6])).join("")}
           <form className="access-form" onSubmit={e=>{e.preventDefault();void saveAccessUser(new FormData(e.currentTarget));e.currentTarget.reset();}}>
             <label>Nombre completo<input name="name" required placeholder="Nombre del supervisor" /></label>
             <label>Correo de acceso<input name="email" type="email" required placeholder="usuario@correo.com" /></label>
-            <label>Local asignado<select name="locationId" required defaultValue=""><option value="" disabled>Seleccionar local</option>{data?.locations.map(l=><option key={l.id} value={l.id}>{l.name} · {l.city}</option>)}</select></label>
+            <label>Locales permitidos<select name="locationIds" required multiple size={4}>{data?.locations.map(l=><option key={l.id} value={l.id}>{l.name} · {l.city}</option>)}</select><small>Usa Ctrl para elegir varios</small></label>
             <button className="primary">＋ Registrar usuario</button>
           </form>
           <div className="access-list">
             <div className="access-row access-head"><span>Usuario</span><span>Correo</span><span>Local permitido</span><span>Acciones</span></div>
             {accessUsers.length ? accessUsers.map(user=><div className="access-row" key={user.id}>
-              <strong>{user.name}</strong><span>{user.email}</span><span>{user.location_name}</span>
+              <strong>{user.name}</strong><span>{user.email}</span><span>{user.location_names.length ? user.location_names.join(", ") : "Sin asignar"}</span>
               <div className="access-actions">
-                <button className="access-edit" onClick={()=>setEditAccessUser(user)}>Editar</button>
+                <button className="access-edit" onClick={()=>{setEditAccessUser(user);setEditAccessLocations(user.location_ids)}}>Editar</button>
                 <button className={user.active===1?"access-active":"access-blocked"} onClick={()=>void toggleAccessUser(user)}>{user.active===1?"Bloquear":"Reactivar"}</button>
               </div>
             </div>) : <div className="empty-report">Todavía no has registrado supervisores con acceso.</div>}
@@ -474,9 +475,9 @@ ${detailRows.map(values=>row(values,[6])).join("")}
         <h2>{editAccessUser.name}</h2>
         <p>{editAccessUser.email}</p>
         <label>Nombre completo<input name="name" required defaultValue={editAccessUser.name} /></label>
-        <label>Local asignado<select name="locationId" required defaultValue={editAccessUser.location_id || ""}><option value="" disabled>Seleccionar local</option>{data?.locations.map(l=><option key={l.id} value={l.id}>{l.name} · {l.city}</option>)}</select></label>
+        <fieldset className="location-checks"><legend>Locales permitidos</legend>{data?.locations.map(l=><label key={l.id}><input type="checkbox" checked={editAccessLocations.includes(l.id)} onChange={e=>setEditAccessLocations(ids=>e.target.checked?[...ids,l.id]:ids.filter(id=>id!==l.id))} /> <span>{l.name} · {l.city}</span></label>)}</fieldset>
         <label>Estado<select name="active" defaultValue={editAccessUser.active}><option value={1}>Activo</option><option value={0}>Bloqueado</option></select></label>
-        <button className="primary save">Guardar cambios</button>
+        <button className="primary save" disabled={!editAccessLocations.length}>Guardar cambios</button>
       </form></div>}
       {modal && <div className="modal-backdrop" onMouseDown={() => setModal(null)}><form className="modal" onSubmit={e => {e.preventDefault(); saveShift(new FormData(e.currentTarget));}} onMouseDown={e => e.stopPropagation()}>
         <button type="button" className="close" onClick={() => setModal(null)}>×</button>
