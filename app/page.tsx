@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { toPng } from "html-to-image";
 
 type Shift = { time: string; role: string; tone: "blue" | "green" | "orange" | "yellow" };
 type Person = { id: number; name: string; location: string; initials: string; shifts: (Shift | null)[] };
@@ -84,6 +85,7 @@ export default function Home() {
   const [accessUsers, setAccessUsers] = useState<AccessUserRow[]>([]);
   const [editAccessUser, setEditAccessUser] = useState<AccessUserRow | null>(null);
   const [editAccessLocations, setEditAccessLocations] = useState<number[]>([]);
+  const scheduleRef=useRef<HTMLElement|null>(null);
 
   const dateKeys = useMemo(() => Array.from({length:7},(_,i) => {
     const d = new Date(`${weekStart}T12:00:00`);
@@ -262,6 +264,40 @@ ${detailRows.map(values=>row(values,[6])).join("")}
     await loadData();
   }
 
+  async function downloadScheduleImage() {
+    const node=scheduleRef.current;
+    if(!node){setNotice("No se encontró el horario para generar la imagen");return;}
+    const tableWrap=node.querySelector<HTMLElement>(".table-wrap");
+    const table=node.querySelector<HTMLElement>("table");
+    const originalWidth=node.style.width;
+    const originalMaxWidth=node.style.maxWidth;
+    const originalOverflow=tableWrap?.style.overflow??"";
+    try{
+      setNotice("Generando imagen del horario...");
+      const exportWidth=Math.max(1200,(table?.scrollWidth??0)+44);
+      node.style.width=`${exportWidth}px`;
+      node.style.maxWidth="none";
+      if(tableWrap)tableWrap.style.overflow="visible";
+      await new Promise(resolve=>requestAnimationFrame(()=>resolve(null)));
+      const dataUrl=await toPng(node,{
+        cacheBust:true,pixelRatio:2,backgroundColor:"#ffffff",
+        width:node.scrollWidth,height:node.scrollHeight,
+        filter:element=>!(element instanceof HTMLElement&&element.classList.contains("schedule-actions"))
+      });
+      const link=document.createElement("a");
+      link.download=`Horario_${location.replace(/[^a-z0-9]+/gi,"_")}_${weekStart}.png`;
+      link.href=dataUrl;
+      link.click();
+      setNotice("✓ Imagen del horario generada correctamente");
+    }catch{
+      setNotice("Error: no se pudo generar la imagen del horario");
+    }finally{
+      node.style.width=originalWidth;
+      node.style.maxWidth=originalMaxWidth;
+      if(tableWrap)tableWrap.style.overflow=originalOverflow;
+    }
+  }
+
   function changeWeek(offset:number) {
     const d = new Date(`${weekStart}T12:00:00`);
     d.setDate(d.getDate()+offset*7);
@@ -423,8 +459,8 @@ ${detailRows.map(values=>row(values,[6])).join("")}
           <article><span>{isAdmin?"Locales registrados":"Local asignado"}</span><strong>{data?.locations.length ?? 0}</strong><small className="warn">{isAdmin?"Administrables":"Acceso limitado"}</small></article>
         </section>
 
-        {(active === "Panel general" || active === "Horarios") && <section className="schedule-card">
-          <div className="schedule-title"><div><h2>Horario semanal</h2><p>{isAdmin?"Haz clic en el nombre para editar al supervisor o en cualquier turno para modificarlo":"Puedes crear y modificar los horarios de tus locales asignados"}</p></div><div className="schedule-actions"><button className="schedule-action-button" onClick={() => setCreate("supervisor")}>＋ Agregar fila</button><button className="schedule-action-button" onClick={()=>void copyWeek()}>▣ Copiar semana</button></div></div>
+        {(active === "Panel general" || active === "Horarios") && <section className="schedule-card" ref={scheduleRef}>
+          <div className="schedule-title"><div><h2>Horario semanal</h2><p>{isAdmin?"Haz clic en el nombre para editar al supervisor o en cualquier turno para modificarlo":"Puedes crear y modificar los horarios de tus locales asignados"}</p></div><div className="schedule-actions"><button className="schedule-action-button" onClick={() => setCreate("supervisor")}>＋ Agregar fila</button><button className="schedule-action-button" onClick={()=>void copyWeek()}>▣ Copiar semana</button><button className="schedule-action-button image-action" onClick={()=>void downloadScheduleImage()}>▧ Descargar imagen</button></div></div>
           <div className="toolbar">
             <div className="week"><button aria-label="Semana anterior" onClick={() => changeWeek(-1)}>‹</button><strong>{weekLabel}</strong><button aria-label="Semana siguiente" onClick={() => changeWeek(1)}>›</button></div>
             <select value={location} onChange={e => setLocation(e.target.value)}>{isAdmin && <option>Todos los locales</option>}{(data?.locations.map(l => l.name) ?? locations.slice(1)).map(l => <option key={l}>{l}</option>)}</select>
