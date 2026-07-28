@@ -424,7 +424,7 @@ ${detailRows.map(values=>row(values,[6])).join("")}
         </section>
 
         {(active === "Panel general" || active === "Horarios") && <section className="schedule-card">
-          <div className="schedule-title"><div><h2>Horario semanal</h2><p>{isAdmin?"Haz clic en el nombre para editar al supervisor o en cualquier turno para modificarlo":"Puedes crear y modificar los horarios de tus locales asignados"}</p></div><div className="schedule-actions"><button className="copy" onClick={() => setCreate("supervisor")}>＋ Agregar fila</button><button className="copy" onClick={()=>void copyWeek()}>▣ Copiar semana</button></div></div>
+          <div className="schedule-title"><div><h2>Horario semanal</h2><p>{isAdmin?"Haz clic en el nombre para editar al supervisor o en cualquier turno para modificarlo":"Puedes crear y modificar los horarios de tus locales asignados"}</p></div><div className="schedule-actions"><button className="schedule-action-button" onClick={() => setCreate("supervisor")}>＋ Agregar fila</button><button className="schedule-action-button" onClick={()=>void copyWeek()}>▣ Copiar semana</button></div></div>
           <div className="toolbar">
             <div className="week"><button aria-label="Semana anterior" onClick={() => changeWeek(-1)}>‹</button><strong>{weekLabel}</strong><button aria-label="Semana siguiente" onClick={() => changeWeek(1)}>›</button></div>
             <select value={location} onChange={e => setLocation(e.target.value)}>{isAdmin && <option>Todos los locales</option>}{(data?.locations.map(l => l.name) ?? locations.slice(1)).map(l => <option key={l}>{l}</option>)}</select>
