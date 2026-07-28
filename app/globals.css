@@ -110,6 +110,7 @@ th:first-child { z-index:2; background:#fbfcfd; padding-left:12px; }
   .schedule-title{align-items:flex-start;flex-direction:column;gap:14px}
   .schedule-actions{display:grid;grid-template-columns:1fr 1fr;width:100%;gap:8px}
   .schedule-actions .schedule-action-button{display:block;width:100%;padding:11px 8px;font-size:12px}
+  .schedule-actions .image-action{grid-column:1/-1;background:#102f4d;color:#fff;border-color:#102f4d}
   .table-wrap{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
   .cards-grid,.directory,.role-grid,.settings-grid{grid-template-columns:1fr}.management-card{padding:17px}.management-head{align-items:flex-start}
   .report-filters{grid-template-columns:1fr}.report-note{flex-wrap:wrap}.report-row{grid-template-columns:1fr .6fr}.report-row span:nth-child(2),.report-row strong:nth-child(2){display:none}
