@@ -14,12 +14,16 @@ export async function GET(request:NextRequest) {
     db.from("profile_locations").select("profile_id,location_id,locations(name)")
   ]);
   if(error)return NextResponse.json({error:error.message},{status:403});
-  if(grantsError)return NextResponse.json({error:grantsError.message},{status:403});
+  const safeGrants=grantsError?[]:(grants||[]);
   return NextResponse.json({users:(data||[]).filter((x:any)=>x.app_role!=="admin").map((x:any)=>({
     id:x.id,email:x.email,name:x.full_name||x.email,role:x.app_role,location_id:x.location_id,
     location_name:x.locations?.name||"Sin asignar",
-    location_ids:(grants||[]).filter((g:any)=>g.profile_id===x.id).map((g:any)=>g.location_id),
-    location_names:(grants||[]).filter((g:any)=>g.profile_id===x.id).map((g:any)=>g.locations?.name).filter(Boolean),
+    location_ids:safeGrants.filter((g:any)=>g.profile_id===x.id).map((g:any)=>g.location_id).concat(
+      safeGrants.some((g:any)=>g.profile_id===x.id)||!x.location_id?[]:[x.location_id]
+    ),
+    location_names:safeGrants.filter((g:any)=>g.profile_id===x.id).map((g:any)=>g.locations?.name).filter(Boolean).concat(
+      safeGrants.some((g:any)=>g.profile_id===x.id)||!x.locations?.name?[]:[x.locations.name]
+    ),
     active:x.active?1:0
   }))});
 }
