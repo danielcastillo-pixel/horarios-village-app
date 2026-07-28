@@ -27,6 +27,14 @@ export async function POST(request:NextRequest) {
   } else if(body.action==="toggle"){
     const {error}=await db.from("profiles").update({active:Boolean(body.active)}).eq("id",body.id);
     if(error)return NextResponse.json({error:error.message},{status:400});
+  } else if(body.action==="update"){
+    const {error}=await db.from("profiles").update({
+      full_name:String(body.name||"").trim(),
+      location_id:Number(body.locationId),
+      app_role:"supervisor",
+      active:Boolean(body.active)
+    }).eq("id",body.id);
+    if(error)return NextResponse.json({error:error.message},{status:400});
   } else return NextResponse.json({error:"Acción desconocida"},{status:400});
   return NextResponse.json({ok:true});
 }
