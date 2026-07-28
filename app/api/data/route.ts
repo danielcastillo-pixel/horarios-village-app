@@ -39,7 +39,9 @@ const regionalLocations=[
 
 export async function GET(request:NextRequest) {
   const db=client(request);
-  const {data:profile,error:profileError}=await db.from("profiles").select("*").single();
+  const {data:{user},error:userError}=await db.auth.getUser();
+  if(userError||!user) return NextResponse.json({error:"Sesión no válida"},{status:401});
+  const {data:profile,error:profileError}=await db.from("profiles").select("*").eq("id",user.id).single();
   if(profileError||!profile) return NextResponse.json({error:"Usuario no autorizado"},{status:403});
   if(!profile.active) return NextResponse.json({error:"Usuario pendiente de activación"},{status:403});
   if(profile.app_role==="admin"){
