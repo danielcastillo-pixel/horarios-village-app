@@ -60,6 +60,7 @@ function excelEscape(value: unknown) {
 }
 
 export default function Home() {
+  const [mobileMenuOpen,setMobileMenuOpen] = useState(false);
   const [sessionReady,setSessionReady] = useState(false);
   const [loginEmail,setLoginEmail] = useState("");
   const [loginPassword,setLoginPassword] = useState("");
@@ -356,12 +357,15 @@ ${detailRows.map(values=>row(values,[6])).join("")}
 
   return (
     <main className="app-shell">
-      <aside className="sidebar">
+      <button className="mobile-menu-toggle" aria-label="Abrir menú" onClick={()=>setMobileMenuOpen(true)}>☰ <span>Menú</span></button>
+      {mobileMenuOpen && <button className="mobile-menu-backdrop" aria-label="Cerrar menú" onClick={()=>setMobileMenuOpen(false)} />}
+      <aside className={`sidebar ${mobileMenuOpen?"mobile-open":""}`}>
+        <button className="mobile-menu-close" aria-label="Cerrar menú" onClick={()=>setMobileMenuOpen(false)}>×</button>
         <div className="brand"><span>TIPTI · OPERACIONES</span><strong>Región Intercity</strong></div>
-        <nav>{visibleNav.map(([icon,label]) => <button key={label} className={active === label ? "active" : ""} onClick={() => setActive(label)}><i>{icon}</i>{label}</button>)}</nav>
+        <nav>{visibleNav.map(([icon,label]) => <button key={label} className={active === label ? "active" : ""} onClick={() => {setActive(label);setMobileMenuOpen(false)}}><i>{icon}</i>{label}</button>)}</nav>
         <div className="profile"><div className="avatar admin">{data?.currentUser.name.split(" ").map(x=>x[0]).join("").slice(0,2).toUpperCase()}</div><div><strong>{data?.currentUser.name}</strong><span>{isAdmin?"Administrador total":"Supervisor de local"}</span></div></div>
-        <button className="logout" onClick={() => void supabase.auth.signOut()}>↪ Cerrar sesión</button>
-        {isAdmin && <button className="settings" onClick={() => setActive("Configuración")}>⚙ Configuración</button>}
+        <button className="logout" onClick={() => {setMobileMenuOpen(false);void supabase.auth.signOut()}}>↪ Cerrar sesión</button>
+        {isAdmin && <button className="settings" onClick={() => {setActive("Configuración");setMobileMenuOpen(false)}}>⚙ Configuración</button>}
       </aside>
 
       <section className="workspace">
