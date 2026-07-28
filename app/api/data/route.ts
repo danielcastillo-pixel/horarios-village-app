@@ -79,6 +79,24 @@ export async function POST(request:NextRequest) {
   else if(body.action==="addSupervisor") result=await db.from("supervisors").insert({name:String(body.name).trim(),location_id:body.locationId});
   else if(body.action==="addRole") result=await db.from("roles").insert({name:String(body.name).trim(),color:body.color,counts_hours:!["Descanso","Libre","Vacaciones"].includes(String(body.name))});
   else if(body.action==="updateSupervisor") result=await db.from("supervisors").update({name:body.name,location_id:body.locationId,active:Boolean(body.active)}).eq("id",body.id);
+  else if(body.action==="copyWeek"){
+    const sourceStart=String(body.sourceStart),targetStart=String(body.targetStart);
+    const sourceEnd=new Date(`${sourceStart}T12:00:00`);sourceEnd.setDate(sourceEnd.getDate()+6);
+    const {data:localSupervisors,error:supervisorError}=await db.from("supervisors").select("id").eq("location_id",body.locationId).eq("active",true);
+    if(supervisorError)return NextResponse.json({error:supervisorError.message},{status:400});
+    const supervisorIds=(localSupervisors||[]).map((s:any)=>s.id);
+    if(!supervisorIds.length)return NextResponse.json({error:"El local no tiene filas de supervisores activas."},{status:400});
+    const {data:source,error:sourceError}=await db.from("assignments").select("supervisor_id,work_date,start_time,end_time,role_id,notes").in("supervisor_id",supervisorIds).gte("work_date",sourceStart).lte("work_date",sourceEnd.toISOString().slice(0,10));
+    if(sourceError)return NextResponse.json({error:sourceError.message},{status:400});
+    const copied=(source||[]).map((assignment:any)=>{
+      const date=new Date(`${assignment.work_date}T12:00:00`);date.setDate(date.getDate()+7);
+      return {...assignment,work_date:date.toISOString().slice(0,10),updated_at:new Date().toISOString()};
+    });
+    if(!copied.length)return NextResponse.json({error:"La semana actual no tiene turnos para copiar."},{status:400});
+    const {error:copyError}=await db.from("assignments").upsert(copied,{onConflict:"supervisor_id,work_date"});
+    if(copyError)return NextResponse.json({error:copyError.message},{status:400});
+    return NextResponse.json({ok:true,copied:copied.length});
+  }
   else return NextResponse.json({error:"Acción desconocida"},{status:400});
   if(result.error)return NextResponse.json({error:result.error.message},{status:400});
   return NextResponse.json({ok:true});
