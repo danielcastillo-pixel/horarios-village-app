@@ -1,0 +1,1 @@
+Forzar despliegue del botón Cerrar sesión y catálogo regional.
