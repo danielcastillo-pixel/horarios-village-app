@@ -469,7 +469,7 @@ ${detailRows.map(values=>row(values,[6])).join("")}
       setLoginError(error ? error.message : "Cuenta creada. Confirma tu correo y espera que el administrador active tu acceso.");
     } else {
       const {error} = await supabase.auth.signInWithPassword({email:loginEmail,password:loginPassword});
-      if (error) setLoginError("Correo o contraseña incorrectos.");
+      if (error) setLoginError(`Supabase: ${error.message}`);
     }
   }
 
