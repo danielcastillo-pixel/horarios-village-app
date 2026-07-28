@@ -311,7 +311,11 @@ ${detailRows.map(values=>row(values,[6])).join("")}
 
   async function loadAccessUsers() {
     const response = await apiFetch("/api/access");
-    if (!response.ok) return;
+    if (!response.ok) {
+      const problem=await response.json().catch(()=>({error:"No se pudo cargar la lista"})) as {error?:string};
+      setNotice(`Error al cargar usuarios: ${problem.error ?? "No disponible"}`);
+      return;
+    }
     const payload = await response.json() as {users:AccessUserRow[]};
     setAccessUsers(payload.users);
   }
