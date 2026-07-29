@@ -17,6 +17,8 @@ type AccessUserRow = { id:number; email:string; name:string; role:string; locati
 type ShopperRow={id:number;name:string;shopper_external_id:string|null;category:"purchase"|"delivery";employment_type:string;location_id:number;location_name:string;active:number};
 type ShopperTurnRow={id:number;staff_id:number;work_date:string;turn_code:string};
 type ShopperShiftType={id:number;code:string;label:string;start_time:string|null;end_time:string|null;category:"purchase"|"delivery"|"both";location_id:number|null;counts_opening:boolean;counts_closing:boolean;is_free:boolean};
+type PresenceType="supervisor"|"purchase"|"delivery";
+type PresenceRow={key:string;name:string;initials:string;kind:PresenceType;role:string;start:string;end:string;active:boolean;minutesUntil:number};
 
 const locations = [
   "Todos los locales", "MX. Village Plaza", "SX. Plaza Batán", "SX. Villa Club",
@@ -53,6 +55,13 @@ function shiftHours(item: Shift | null) {
 
 function displayHours(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0$/,"");
+}
+
+function durationLabel(minutes:number){
+  const hours=Math.floor(minutes/60),rest=minutes%60;
+  if(hours&&rest)return `${hours} h ${rest} min`;
+  if(hours)return `${hours} h`;
+  return `${rest} min`;
 }
 
 function shiftTime(item: Shift | null, position: 0 | 1, fallback: string) {
@@ -122,6 +131,13 @@ export default function Home() {
   const [addShopperShift,setAddShopperShift]=useState(false);
   const [reportType,setReportType]=useState<"supervisor"|"shopper">("supervisor");
   const shopperScheduleRef=useRef<HTMLElement|null>(null);
+  const currentLocalDate=()=>new Date().toLocaleDateString("en-CA");
+  const currentLocalTime=()=>new Date().toTimeString().slice(0,5);
+  const [presenceLocation,setPresenceLocation]=useState("");
+  const [presenceDate,setPresenceDate]=useState(currentLocalDate);
+  const [presenceTime,setPresenceTime]=useState(currentLocalTime);
+  const [presenceTypes,setPresenceTypes]=useState<PresenceType[]>(["supervisor","purchase","delivery"]);
+  const [presenceSearched,setPresenceSearched]=useState(false);
 
   const dateKeys = useMemo(() => Array.from({length:7},(_,i) => {
     const d = new Date(`${weekStart}T12:00:00`);
@@ -158,6 +174,7 @@ export default function Home() {
       const payload = await response.json() as DataSet;
       setData(payload);
       setAccessState("authorized");
+      setPresenceLocation(current=>current||payload.locations[0]?.name||"");
       if (payload.currentUser.role === "supervisor" && payload.locations[0]) {
         setLocation(payload.locations[0].name);
         setReportLocation(payload.locations[0].name);
@@ -184,7 +201,7 @@ export default function Home() {
   useEffect(() => {
     if (active === "Accesos" && data?.currentUser.role === "admin") void loadAccessUsers();
   },[active,data?.currentUser.role]);
-  useEffect(()=>{if(active==="Shoppers"||(active==="Reportes"&&reportType==="shopper"))void loadShoppers();},[active,shopperCategory,reportType]);
+  useEffect(()=>{if(active==="Panel general"||active==="Shoppers"||(active==="Reportes"&&reportType==="shopper"))void loadShoppers();},[active,shopperCategory,reportType]);
   useEffect(() => {
     if (!data) return;
     setPeople(data.supervisors.filter(s => s.active === 1).map(s => ({
@@ -228,6 +245,51 @@ export default function Home() {
     });
     return [...summary.values()].sort((a,b) => a.name.localeCompare(b.name));
   },[reportRows]);
+
+  const presenceResults=useMemo(()=>{
+    if(!data||!presenceLocation||!presenceDate||!presenceTime)return {active:[] as PresenceRow[],upcoming:[] as PresenceRow[]};
+    const selectedLocation=data.locations.find(item=>item.name===presenceLocation);
+    if(!selectedLocation)return {active:[] as PresenceRow[],upcoming:[] as PresenceRow[]};
+    const [selectedHour,selectedMinute]=presenceTime.split(":").map(Number);
+    const nowMinutes=selectedHour*60+selectedMinute;
+    const previousDate=new Date(`${presenceDate}T12:00:00`);
+    previousDate.setDate(previousDate.getDate()-1);
+    const previousKey=previousDate.toISOString().slice(0,10);
+    const rows:PresenceRow[]=[];
+    const addRow=(row:Omit<PresenceRow,"active"|"minutesUntil">,workDate:string)=>{
+      const parse=(value:string)=>{const [h,m]=value.slice(0,5).split(":").map(Number);return h*60+m};
+      const start=parse(row.start),end=parse(row.end);
+      const overnight=end<=start;
+      let active=false;
+      if(workDate===presenceDate)active=overnight?nowMinutes>=start:nowMinutes>=start&&nowMinutes<end;
+      if(workDate===previousKey&&overnight)active=nowMinutes<end;
+      const minutesUntil=workDate===presenceDate&&start>nowMinutes?start-nowMinutes:Number.POSITIVE_INFINITY;
+      if(active||Number.isFinite(minutesUntil))rows.push({...row,active,minutesUntil});
+    };
+    if(presenceTypes.includes("supervisor")){
+      data.assignments
+        .filter(item=>item.work_date===presenceDate||item.work_date===previousKey)
+        .forEach(item=>{
+          const supervisor=data.supervisors.find(person=>person.id===item.supervisor_id&&person.active===1&&person.location_id===selectedLocation.id);
+          if(!supervisor||!item.start_time||!item.end_time||["Libre","Descanso","Vacaciones"].includes(item.role_name))return;
+          addRow({key:`supervisor-${item.id}`,name:supervisor.name,initials:supervisor.name.split(" ").map(part=>part[0]).join("").slice(0,2).toUpperCase(),kind:"supervisor",role:"Supervisor",start:item.start_time,end:item.end_time},item.work_date);
+        });
+    }
+    shopperTurns
+      .filter(item=>item.work_date===presenceDate||item.work_date===previousKey)
+      .forEach(item=>{
+        const staff=shopperStaff.find(person=>person.id===item.staff_id&&person.active===1&&person.location_id===selectedLocation.id);
+        if(!staff||!presenceTypes.includes(staff.category))return;
+        const shiftType=shopperShiftTypes.find(type=>type.code===item.turn_code&&type.location_id===staff.location_id&&(type.category===staff.category||type.category==="both"))
+          ??shopperShiftTypes.find(type=>type.code===item.turn_code&&type.location_id===null&&(type.category===staff.category||type.category==="both"));
+        if(!shiftType||shiftType.is_free||!shiftType.start_time||!shiftType.end_time)return;
+        addRow({key:`${staff.category}-${item.id}`,name:staff.name,initials:staff.name.split(" ").map(part=>part[0]).join("").slice(0,2).toUpperCase(),kind:staff.category,role:staff.category==="purchase"?"Asesor de compra":"Repartidor",start:shiftType.start_time,end:shiftType.end_time},item.work_date);
+      });
+    return {
+      active:rows.filter(item=>item.active).sort((a,b)=>a.role.localeCompare(b.role)||a.name.localeCompare(b.name)),
+      upcoming:rows.filter(item=>!item.active).sort((a,b)=>a.minutesUntil-b.minutesUntil).slice(0,8)
+    };
+  },[data,presenceLocation,presenceDate,presenceTime,presenceTypes,shopperStaff,shopperTurns,shopperShiftTypes]);
 
   async function downloadExcelReport() {
     if (!reportLocation) { setNotice("Selecciona el local del reporte"); return; }
@@ -430,10 +492,15 @@ export default function Home() {
   }
 
   async function loadShoppers(){
-    const response=await apiFetch(`/api/shoppers?category=${shopperCategory}`);
-    if(!response.ok){const p=await response.json().catch(()=>({error:"No disponible"}));setNotice(`Error: ${p.error}`);return;}
-    const payload=await response.json() as {staff:ShopperRow[];turns:ShopperTurnRow[];shiftTypes:ShopperShiftType[]};
-    setShopperStaff(payload.staff);setShopperTurns(payload.turns);setShopperShiftTypes(payload.shiftTypes);
+    const categories:("purchase"|"delivery")[]=active==="Panel general"?["purchase","delivery"]:[shopperCategory];
+    const responses=await Promise.all(categories.map(category=>apiFetch(`/api/shoppers?category=${category}`)));
+    const failed=responses.find(response=>!response.ok);
+    if(failed){const p=await failed.json().catch(()=>({error:"No disponible"}));setNotice(`Error: ${p.error}`);return;}
+    const payloads=await Promise.all(responses.map(response=>response.json() as Promise<{staff:ShopperRow[];turns:ShopperTurnRow[];shiftTypes:ShopperShiftType[]}>));
+    const uniqueById=<T extends {id:number}>(rows:T[])=>[...new Map(rows.map(row=>[row.id,row])).values()];
+    setShopperStaff(uniqueById(payloads.flatMap(payload=>payload.staff)));
+    setShopperTurns(uniqueById(payloads.flatMap(payload=>payload.turns)));
+    setShopperShiftTypes(uniqueById(payloads.flatMap(payload=>payload.shiftTypes)));
   }
 
   async function createShopper(form:FormData){
@@ -664,6 +731,27 @@ export default function Home() {
           <div><p className="eyebrow">CONTROL OPERATIVO REGIONAL</p><h1>{active}</h1><p>Planificación y control semanal de supervisión</p></div>
           <div className="header-actions"><button className="secondary" onClick={() => window.print()}>⇩ Exportar</button><button className="primary" onClick={() => {setActive("Horarios");if(!people.length)setCreate("supervisor");else setNotice("Selecciona una celda para crear o modificar un turno");}}>＋ Nuevo horario</button></div>
         </header>
+
+        {active==="Panel general"&&<section className="presence-card">
+          <div className="presence-heading"><div><span className="presence-live-dot" /><div><h2>¿Quién está de turno?</h2><p>Consulta el personal programado por local, fecha y hora.</p></div></div><span className="presence-now">Consulta operativa</span></div>
+          <div className="presence-filters">
+            <label>Local<select value={presenceLocation} onChange={event=>{setPresenceLocation(event.target.value);setPresenceSearched(false)}}>{data?.locations.map(item=><option key={item.id} value={item.name}>{item.name} · {item.city}</option>)}</select></label>
+            <label>Fecha<input type="date" value={presenceDate} onChange={event=>{setPresenceDate(event.target.value);setPresenceSearched(false)}} /></label>
+            <label>Hora<input type="time" value={presenceTime} onChange={event=>{setPresenceTime(event.target.value);setPresenceSearched(false)}} /></label>
+          </div>
+          <fieldset className="presence-types"><legend>Personal que deseas consultar</legend>{([
+            ["supervisor","Supervisores"],["purchase","Asesores de compra"],["delivery","Repartidores"]
+          ] as [PresenceType,string][]).map(([value,label])=><label key={value}><input type="checkbox" checked={presenceTypes.includes(value)} onChange={event=>{setPresenceTypes(current=>event.target.checked?[...current,value]:current.filter(item=>item!==value));setPresenceSearched(false)}} /><span>{label}</span></label>)}</fieldset>
+          <button className="primary presence-search" disabled={!presenceTypes.length||!presenceLocation} onClick={()=>setPresenceSearched(true)}>⌕ Buscar personal</button>
+          {presenceSearched&&<div className="presence-results">
+            <div className="presence-result-section"><div className="presence-result-title"><span className="presence-live-dot" /><strong>EN TURNO AHORA</strong><b>{presenceResults.active.length}</b></div>
+              {presenceResults.active.length?<div className="presence-people">{presenceResults.active.map(person=><article key={person.key}><span className={`presence-avatar ${person.kind}`}>{person.initials}</span><div><strong>{person.name}</strong><span>{person.role} · {person.start.slice(0,5)}–{person.end.slice(0,5)}</span><small>Activo ahora</small></div></article>)}</div>:<div className="presence-empty"><strong>Sin personal en turno</strong><span>No existe un horario activo para los filtros seleccionados.</span></div>}
+            </div>
+            <div className="presence-result-section upcoming"><div className="presence-result-title"><strong>Próximos turnos</strong><b>{presenceResults.upcoming.length}</b></div>
+              {presenceResults.upcoming.length?<div className="presence-people">{presenceResults.upcoming.map(person=><article key={person.key}><span className={`presence-avatar ${person.kind}`}>{person.initials}</span><div><strong>{person.name}</strong><span>{person.role} · {person.start.slice(0,5)}–{person.end.slice(0,5)}</span></div><small className="starts-in">En {durationLabel(person.minutesUntil)}</small></article>)}</div>:<div className="presence-empty compact"><span>No hay más turnos programados para ese día.</span></div>}
+            </div>
+          </div>}
+        </section>}
 
         <section className="kpis">
           <article><span>Supervisores activos</span><strong>{data?.supervisors.filter(s=>s.active===1).length ?? people.length}</strong><small className="ok">● Nómina disponible</small></article>
