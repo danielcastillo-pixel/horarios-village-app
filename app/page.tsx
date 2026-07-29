@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { toPng } from "html-to-image";
+import * as XLSX from "xlsx";
 
 type Shift = { time: string; role: string; tone: "blue" | "green" | "orange" | "yellow" };
 type Person = { id: number; name: string; location: string; initials: string; shifts: (Shift | null)[] };
@@ -61,6 +62,24 @@ function shiftTime(item: Shift | null, position: 0 | 1, fallback: string) {
 
 function excelEscape(value: unknown) {
   return String(value ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+async function downloadWorkbook97(workbook:XLSX.WorkBook,filename:string) {
+  const bytes=XLSX.write(workbook,{bookType:"biff8",type:"array"});
+  const blob=new Blob([bytes],{type:"application/vnd.ms-excel"});
+  const file=new File([blob],filename,{type:"application/vnd.ms-excel"});
+  if(navigator.share&&navigator.canShare?.({files:[file]})){
+    await navigator.share({files:[file],title:"Reporte de horarios"});
+    return;
+  }
+  const url=URL.createObjectURL(blob);
+  const link=document.createElement("a");
+  link.href=url;
+  link.download=filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 
 export default function Home() {
@@ -210,7 +229,7 @@ export default function Home() {
     return [...summary.values()].sort((a,b) => a.name.localeCompare(b.name));
   },[reportRows]);
 
-  function downloadExcelReport() {
+  async function downloadExcelReport() {
     if (!reportLocation) { setNotice("Selecciona el local del reporte"); return; }
     if (!reportStart || !reportEnd || reportStart > reportEnd) { setNotice("Selecciona un rango de fechas válido"); return; }
     if (!reportRows.length) { setNotice("No existen horarios guardados para ese local y rango"); return; }
@@ -218,28 +237,27 @@ export default function Home() {
       const free = ["Libre","Descanso","Vacaciones"].includes(assignment.role_name);
       return [assignment.work_date,supervisor?.name,reportLocation,assignment.role_name,free?"":assignment.start_time,free?"":assignment.end_time,free?0:Number(assignment.hours ?? 0),free?"Libre":"Trabajado"];
     });
-    const cell = (value:unknown,type:"String"|"Number"="String") => `<Cell><Data ss:Type="${type}">${excelEscape(value)}</Data></Cell>`;
-    const row = (values:unknown[],numeric:number[] = []) => `<Row>${values.map((v,i)=>cell(v,numeric.includes(i)?"Number":"String")).join("")}</Row>`;
-    const workbook = `<?xml version="1.0"?>
-<?mso-application progid="Excel.Sheet"?>
-<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
-<Styles><Style ss:ID="Header"><Font ss:Bold="1" ss:Color="#FFFFFF"/><Interior ss:Color="#12304A" ss:Pattern="Solid"/></Style></Styles>
-<Worksheet ss:Name="Resumen"><Table>
-<Row><Cell ss:StyleID="Header"><Data ss:Type="String">Supervisor</Data></Cell><Cell ss:StyleID="Header"><Data ss:Type="String">Local</Data></Cell><Cell ss:StyleID="Header"><Data ss:Type="String">Horas totales</Data></Cell><Cell ss:StyleID="Header"><Data ss:Type="String">Días trabajados</Data></Cell><Cell ss:StyleID="Header"><Data ss:Type="String">Días libres</Data></Cell><Cell ss:StyleID="Header"><Data ss:Type="String">Vacaciones</Data></Cell></Row>
-${reportSummary.map(s=>row([s.name,reportLocation,s.hours,s.worked,s.free,s.vacations],[2,3,4,5])).join("")}
-</Table></Worksheet>
-<Worksheet ss:Name="Detalle diario"><Table>
-<Row><Cell ss:StyleID="Header"><Data ss:Type="String">Fecha</Data></Cell><Cell ss:StyleID="Header"><Data ss:Type="String">Supervisor</Data></Cell><Cell ss:StyleID="Header"><Data ss:Type="String">Local</Data></Cell><Cell ss:StyleID="Header"><Data ss:Type="String">Rol</Data></Cell><Cell ss:StyleID="Header"><Data ss:Type="String">Entrada</Data></Cell><Cell ss:StyleID="Header"><Data ss:Type="String">Salida</Data></Cell><Cell ss:StyleID="Header"><Data ss:Type="String">Horas</Data></Cell><Cell ss:StyleID="Header"><Data ss:Type="String">Estado</Data></Cell></Row>
-${detailRows.map(values=>row(values,[6])).join("")}
-</Table></Worksheet></Workbook>`;
-    const blob = new Blob([workbook],{type:"application/vnd.ms-excel;charset=utf-8"});
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href=url;
-    link.download=`Horario_${reportLocation.replace(/[^a-z0-9]+/gi,"_")}_${reportStart}_${reportEnd}.xls`;
-    link.click();
-    URL.revokeObjectURL(url);
-    setNotice("✓ Reporte de Excel generado correctamente");
+    const summaryData=[
+      ["Supervisor","Local","Horas totales","Días trabajados","Días libres","Vacaciones"],
+      ...reportSummary.map(s=>[s.name,reportLocation,s.hours,s.worked,s.free,s.vacations])
+    ];
+    const detailData=[
+      ["Fecha","Supervisor","Local","Rol","Entrada","Salida","Horas","Estado"],
+      ...detailRows
+    ];
+    const summarySheet=XLSX.utils.aoa_to_sheet(summaryData);
+    const detailSheet=XLSX.utils.aoa_to_sheet(detailData);
+    summarySheet["!cols"]=[{wch:26},{wch:28},{wch:14},{wch:16},{wch:13},{wch:12}];
+    detailSheet["!cols"]=[{wch:13},{wch:26},{wch:28},{wch:24},{wch:11},{wch:11},{wch:10},{wch:13}];
+    const workbook=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook,summarySheet,"Resumen");
+    XLSX.utils.book_append_sheet(workbook,detailSheet,"Detalle diario");
+    try{
+      await downloadWorkbook97(workbook,`Horario_${reportLocation.replace(/[^a-z0-9]+/gi,"_")}_${reportStart}_${reportEnd}.xls`);
+      setNotice("✓ Reporte Excel 97-2003 generado correctamente");
+    }catch(error){
+      if(!(error instanceof DOMException&&error.name==="AbortError"))setNotice("Error: no se pudo generar el reporte");
+    }
   }
 
   async function saveShift(form: FormData) {
@@ -525,7 +543,7 @@ ${detailRows.map(values=>row(values,[6])).join("")}
     }finally{node.remove();}
   }
 
-  function downloadShopperReport(){
+  async function downloadShopperReport(){
     const selected=data?.locations.find(l=>l.name===reportLocation);
     if(!selected){setNotice("Selecciona el local del reporte");return;}
     if(!reportStart||!reportEnd||reportStart>reportEnd){setNotice("Selecciona un rango de fechas válido");return;}
@@ -533,19 +551,24 @@ ${detailRows.map(values=>row(values,[6])).join("")}
     if(!staff.length){setNotice("No existen shoppers para ese local");return;}
     const dates:string[]=[];const cursor=new Date(`${reportStart}T12:00:00`),last=new Date(`${reportEnd}T12:00:00`);
     while(cursor<=last){dates.push(cursor.toISOString().slice(0,10));cursor.setDate(cursor.getDate()+1);}
-    const cell=(value:unknown,type:"String"|"Number"="String")=>`<Cell><Data ss:Type="${type}">${excelEscape(value)}</Data></Cell>`;
-    const rows=staff.flatMap(person=>dates.map(date=>{
+    const rows:(string|number)[][]=staff.flatMap(person=>dates.map(date=>{
       const assigned=shopperTurns.find(t=>t.staff_id===person.id&&t.work_date===date);
       const type=assigned?shopperShiftFor(assigned.turn_code,person.location_id):undefined;
       const free=!assigned||!type||type.is_free;
       const d=new Date(`${date}T12:00:00`);
-      return `<Row>${cell(person.shopper_external_id||"",person.shopper_external_id?"Number":"String")}${cell(d.getMonth()+1,"Number")}${cell(d.getDate(),"Number")}${cell(free?"":type.start_time?.slice(0,5)||"","String")}${cell(free?"":type.end_time?.slice(0,5)||"","String")}${cell(free?"SI":"NO","String")}</Row>`;
+      const shopperId=Number(person.shopper_external_id);
+      return [Number.isFinite(shopperId)?shopperId:"",d.getMonth()+1,d.getDate(),String(free?"":type.start_time?.slice(0,5)||""),String(free?"":type.end_time?.slice(0,5)||""),String(free?"SI":"NO")];
     }));
-    const workbook=`<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Styles><Style ss:ID="Header"><Font ss:Bold="1"/><Interior ss:Color="#F4B183" ss:Pattern="Solid"/></Style></Styles><Worksheet ss:Name="HORARIO"><Table><Row>${["ID_SHOPPER","MES","DIA","HORA_INICIO","HORA_FIN","DIA_LIBRE"].map(x=>`<Cell ss:StyleID="Header"><Data ss:Type="String">${x}</Data></Cell>`).join("")}</Row>${rows.join("")}</Table></Worksheet></Workbook>`;
-    const blob=new Blob([workbook],{type:"application/vnd.ms-excel;charset=utf-8"});
-    const url=URL.createObjectURL(blob),link=document.createElement("a");
-    link.href=url;link.download=`Horario_Shoppers_${selected.name.replace(/[^a-z0-9]+/gi,"_")}_${reportStart}_${reportEnd}.xls`;link.click();URL.revokeObjectURL(url);
-    setNotice("✓ Libro de Excel 97-2003 generado");
+    const sheet=XLSX.utils.aoa_to_sheet([["ID_SHOPPER","MES","DIA","HORA_INICIO","HORA_FIN","DIA_LIBRE"],...rows]);
+    sheet["!cols"]=[{wch:14},{wch:8},{wch:8},{wch:15},{wch:13},{wch:12}];
+    const workbook=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook,sheet,"HORARIO");
+    try{
+      await downloadWorkbook97(workbook,`Horario_Shoppers_${selected.name.replace(/[^a-z0-9]+/gi,"_")}_${reportStart}_${reportEnd}.xls`);
+      setNotice("✓ Libro Excel 97-2003 generado correctamente");
+    }catch(error){
+      if(!(error instanceof DOMException&&error.name==="AbortError"))setNotice("Error: no se pudo generar el reporte");
+    }
   }
 
   async function saveAccessUser(form: FormData) {
