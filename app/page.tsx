@@ -98,6 +98,8 @@ export default function Home() {
   const [loginEmail,setLoginEmail] = useState("");
   const [loginPassword,setLoginPassword] = useState("");
   const [registering,setRegistering] = useState(false);
+  const [recoveringPassword,setRecoveringPassword] = useState(false);
+  const [sendingRecovery,setSendingRecovery] = useState(false);
   const [loginName,setLoginName] = useState("");
   const [loginError,setLoginError] = useState("");
   const [mustChangePassword,setMustChangePassword] = useState(false);
@@ -193,9 +195,9 @@ export default function Home() {
       setMustChangePassword(Boolean(session?.user.app_metadata?.must_change_password));
       if (session) void loadData(); else setAccessState("signin");
     });
-    const {data:{subscription}} = supabase.auth.onAuthStateChange((_event,session) => {
+    const {data:{subscription}} = supabase.auth.onAuthStateChange((event,session) => {
       setSessionReady(true);
-      setMustChangePassword(Boolean(session?.user.app_metadata?.must_change_password));
+      setMustChangePassword(event==="PASSWORD_RECOVERY"||Boolean(session?.user.app_metadata?.must_change_password));
       if (session) { setAccessState("loading"); void loadData(); }
       else { setData(null); setAccessState("signin"); }
     });
@@ -730,8 +732,19 @@ export default function Home() {
     }
   }
 
+  async function requestPasswordRecovery(event:React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoginError("");
+    if(!loginEmail){setLoginError("Escribe el correo de tu cuenta.");return;}
+    setSendingRecovery(true);
+    const {error}=await supabase.auth.resetPasswordForEmail(loginEmail,{redirectTo:window.location.origin});
+    setSendingRecovery(false);
+    if(error){setLoginError(error.message.includes("rate limit")?"Se enviaron demasiadas solicitudes. Espera unos minutos e inténtalo nuevamente.":"No se pudo enviar el enlace. Revisa el correo e inténtalo nuevamente.");return;}
+    setLoginError("✓ Si el correo está registrado, recibirás un enlace para crear una contraseña nueva.");
+  }
+
   if (!sessionReady || accessState === "loading") return <main className="access-gate"><div className="gate-card"><span className="gate-mark">T</span><h1>Verificando acceso</h1><p>Estamos validando tu cuenta y permisos.</p></div></main>;
-  if (accessState === "signin") return <main className="access-gate"><form className="gate-card login-form" onSubmit={submitLogin}><span className="gate-mark">T</span><h1>Acceso privado</h1><p>{registering?"Crea tu cuenta y solicita tus locales":"Ingresa con tu correo y contraseña."}</p>{registering&&<><label>Nombre completo<input value={loginName} onChange={e=>setLoginName(e.target.value)} required /></label><fieldset className="signup-locations"><legend>Locales solicitados</legend>{locations.slice(1).map(local=><label key={local}><input type="checkbox" checked={requestedLocationNames.includes(local)} onChange={e=>setRequestedLocationNames(names=>e.target.checked?[...names,local]:names.filter(name=>name!==local))} /><span>{local}</span></label>)}</fieldset></>}<label>Correo<input type="email" value={loginEmail} onChange={e=>setLoginEmail(e.target.value)} required /></label><label>Contraseña<input type="password" minLength={8} value={loginPassword} onChange={e=>setLoginPassword(e.target.value)} required /></label>{loginError&&<small className="login-error">{loginError}</small>}<button className="primary gate-action">{registering?"Enviar solicitud":"Iniciar sesión"}</button><button type="button" className="secondary gate-action" onClick={()=>{setRegistering(!registering);setLoginError("");setRequestedLocationNames([])}}>{registering?"Ya tengo cuenta":"Crear cuenta"}</button></form></main>;
+  if (accessState === "signin") return <main className="access-gate">{recoveringPassword?<form className="gate-card login-form recovery-form" onSubmit={requestPasswordRecovery}><span className="gate-mark">⚿</span><h1>Recuperar contraseña</h1><p>Escribe el correo de tu cuenta y te enviaremos un enlace para crear una contraseña nueva.</p><label>Correo<input type="email" value={loginEmail} onChange={e=>setLoginEmail(e.target.value)} autoComplete="email" required /></label>{loginError&&<small className={loginError.startsWith("✓")?"login-success":"login-error"}>{loginError}</small>}<button className="primary gate-action" disabled={sendingRecovery}>{sendingRecovery?"Enviando…":"Enviar enlace de recuperación"}</button><button type="button" className="secondary gate-action" onClick={()=>{setRecoveringPassword(false);setLoginError("")}}>Volver a iniciar sesión</button></form>:<form className="gate-card login-form" onSubmit={submitLogin}><span className="gate-mark">T</span><h1>Acceso privado</h1><p>{registering?"Crea tu cuenta y solicita tus locales":"Ingresa con tu correo y contraseña."}</p>{registering&&<><label>Nombre completo<input value={loginName} onChange={e=>setLoginName(e.target.value)} required /></label><fieldset className="signup-locations"><legend>Locales solicitados</legend>{locations.slice(1).map(local=><label key={local}><input type="checkbox" checked={requestedLocationNames.includes(local)} onChange={e=>setRequestedLocationNames(names=>e.target.checked?[...names,local]:names.filter(name=>name!==local))} /><span>{local}</span></label>)}</fieldset></>}<label>Correo<input type="email" value={loginEmail} onChange={e=>setLoginEmail(e.target.value)} required /></label><label>Contraseña<input type="password" minLength={8} value={loginPassword} onChange={e=>setLoginPassword(e.target.value)} required /></label>{!registering&&<button type="button" className="forgot-password" onClick={()=>{setRecoveringPassword(true);setLoginError("")}}>¿Olvidaste tu contraseña?</button>}{loginError&&<small className="login-error">{loginError}</small>}<button className="primary gate-action">{registering?"Enviar solicitud":"Iniciar sesión"}</button><button type="button" className="secondary gate-action" onClick={()=>{setRegistering(!registering);setLoginError("");setRequestedLocationNames([])}}>{registering?"Ya tengo cuenta":"Crear cuenta"}</button></form>}</main>;
   if (accessState === "denied") return <main className="access-gate"><div className="gate-card denied"><span className="gate-mark">×</span><h1>Acceso no autorizado</h1><p>Tu cuenta todavía no fue activada o fue bloqueada.</p><button className="secondary gate-action" onClick={()=>supabase.auth.signOut()}>Cambiar de cuenta</button></div></main>;
   if (mustChangePassword) return <main className="access-gate"><form className="gate-card login-form password-change-card" onSubmit={changeTemporaryPassword}><span className="gate-mark">🔒</span><h1>Crea tu contraseña</h1><p>Ingresaste con una contraseña temporal. Por seguridad, debes reemplazarla antes de continuar.</p><label>Nueva contraseña<input name="password" type="password" minLength={8} autoComplete="new-password" required /></label><label>Confirmar contraseña<input name="confirmation" type="password" minLength={8} autoComplete="new-password" required /></label>{loginError&&<small className="login-error">{loginError}</small>}<button className="primary gate-action" disabled={changingPassword}>{changingPassword?"Guardando…":"Guardar y continuar"}</button><button type="button" className="secondary gate-action" onClick={()=>supabase.auth.signOut()}>Cambiar de cuenta</button></form></main>;
 
