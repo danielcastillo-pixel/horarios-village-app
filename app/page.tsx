@@ -297,11 +297,28 @@ ${detailRows.map(values=>row(values,[6])).join("")}
         width:node.scrollWidth,height:node.scrollHeight,
         filter:element=>!(element instanceof HTMLElement&&element.classList.contains("schedule-actions"))
       });
-      const link=document.createElement("a");
-      link.download=`Horario_${location.replace(/[^a-z0-9]+/gi,"_")}_${weekStart}.png`;
-      link.href=dataUrl;
-      link.click();
-      setNotice("✓ Imagen del horario generada correctamente");
+      const filename=`Horario_${location.replace(/[^a-z0-9]+/gi,"_")}_${weekStart}.png`;
+      const blob=await fetch(dataUrl).then(response=>response.blob());
+      const file=new File([blob],filename,{type:"image/png"});
+      if(navigator.share&&navigator.canShare?.({files:[file]})){
+        try {
+          await navigator.share({files:[file],title:"Horario semanal"});
+          setNotice("✓ Imagen lista para guardar o compartir");
+        } catch(error) {
+          if(error instanceof DOMException&&error.name==="AbortError") setNotice("Se canceló el guardado de la imagen");
+          else throw error;
+        }
+      } else {
+        const url=URL.createObjectURL(blob);
+        const link=document.createElement("a");
+        link.download=filename;
+        link.href=url;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(()=>URL.revokeObjectURL(url),1000);
+        setNotice("✓ Imagen del horario descargada correctamente");
+      }
     }catch{
       setNotice("Error: no se pudo generar la imagen del horario");
     }finally{
