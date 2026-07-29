@@ -37,7 +37,7 @@ function hoursFor(person: Person) {
 }
 
 function shiftHours(item: Shift | null) {
-  if (!item || item.time === "LIBRE" || item.role === "Vacaciones") return 0;
+  if (!item || item.time === "LIBRE" || ["Libre","Descanso","Vacaciones"].includes(item.role)) return 0;
   const times = item.time.match(/\d{2}:\d{2}/g);
   if (!times || times.length < 2) return 0;
   const [start,end] = times.map(value => {
@@ -54,7 +54,7 @@ function displayHours(value: number) {
 }
 
 function shiftTime(item: Shift | null, position: 0 | 1, fallback: string) {
-  if (!item || item.time === "LIBRE" || item.role === "Vacaciones") return fallback;
+  if (!item || item.time === "LIBRE" || ["Libre","Descanso","Vacaciones"].includes(item.role)) return fallback;
   return item.time.match(/\d{2}:\d{2}/g)?.[position] ?? fallback;
 }
 
@@ -166,7 +166,7 @@ export default function Home() {
       shifts:dateKeys.map(date => {
         const a = data.assignments.find(x => x.supervisor_id === s.id && x.work_date === date);
         if (!a) return null;
-        const isRest = a.role_name === "Descanso" || a.role_name === "Vacaciones";
+        const isRest = ["Libre","Descanso","Vacaciones"].includes(a.role_name);
         return { time:isRest ? "LIBRE" : `${a.start_time} — ${a.end_time}`, role:a.role_name, tone:a.color ?? "blue" };
       })
     })));
@@ -193,8 +193,8 @@ export default function Home() {
       if (!supervisor) return;
       const current = summary.get(supervisor.id) ?? {name:supervisor.name,hours:0,worked:0,free:0,vacations:0};
       const isVacation = assignment.role_name === "Vacaciones";
-      const isFree = assignment.role_name === "Descanso" || isVacation;
-      current.hours += Number(assignment.hours ?? 0);
+      const isFree = ["Libre","Descanso"].includes(assignment.role_name) || isVacation;
+      current.hours += isFree ? 0 : Number(assignment.hours ?? 0);
       if (isFree) current.free += 1; else current.worked += 1;
       if (isVacation) current.vacations += 1;
       summary.set(supervisor.id,current);
@@ -207,8 +207,8 @@ export default function Home() {
     if (!reportStart || !reportEnd || reportStart > reportEnd) { setNotice("Selecciona un rango de fechas válido"); return; }
     if (!reportRows.length) { setNotice("No existen horarios guardados para ese local y rango"); return; }
     const detailRows = reportRows.map(({assignment,supervisor}) => {
-      const free = assignment.role_name === "Descanso" || assignment.role_name === "Vacaciones";
-      return [assignment.work_date,supervisor?.name,reportLocation,assignment.role_name,free?"":assignment.start_time,free?"":assignment.end_time,Number(assignment.hours ?? 0),free?"Libre":"Trabajado"];
+      const free = ["Libre","Descanso","Vacaciones"].includes(assignment.role_name);
+      return [assignment.work_date,supervisor?.name,reportLocation,assignment.role_name,free?"":assignment.start_time,free?"":assignment.end_time,free?0:Number(assignment.hours ?? 0),free?"Libre":"Trabajado"];
     });
     const cell = (value:unknown,type:"String"|"Number"="String") => `<Cell><Data ss:Type="${type}">${excelEscape(value)}</Data></Cell>`;
     const row = (values:unknown[],numeric:number[] = []) => `<Row>${values.map((v,i)=>cell(v,numeric.includes(i)?"Number":"String")).join("")}</Row>`;
@@ -239,8 +239,8 @@ ${detailRows.map(values=>row(values,[6])).join("")}
     const role = String(form.get("role"));
     const start = String(form.get("start"));
     const end = String(form.get("end"));
-    const tones: Record<string, Shift["tone"]> = { "Compra / Procesos": "blue", "Certificaciones": "green", "Cierre": "orange", "Descanso": "yellow", "Vacaciones": "yellow", "Total": "blue" };
-    const countsAsFree = role === "Descanso" || role === "Vacaciones";
+    const tones: Record<string, Shift["tone"]> = { "Compra / Procesos": "blue", "Certificaciones": "green", "Cierre": "orange", "Libre": "yellow", "Descanso": "yellow", "Vacaciones": "yellow", "Total": "blue" };
+    const countsAsFree = ["Libre","Descanso","Vacaciones"].includes(role);
     const next = countsAsFree ? shift("LIBRE", role, "yellow") : shift(`${start} — ${end}`, role, tones[role] ?? "blue");
     setPeople(list => list.map(p => p.id === modal.person.id ? { ...p, shifts: p.shifts.map((s, i) => i === modal.day ? next : s) } : p));
     const roleRow = data?.roles.find(r => r.name === role);
@@ -607,7 +607,7 @@ ${detailRows.map(values=>row(values,[6])).join("")}
         <span className="modal-kicker">EDITAR ASIGNACIÓN</span><h2>{modal.person.name}</h2><p>{days[modal.day]} · {modal.person.location}</p>
         <label>Rol<select name="role" defaultValue={modal.person.shifts[modal.day]?.role ?? "Compra / Procesos"}>{(data?.roles.map(r=>r.name) ?? ["Compra / Procesos","Certificaciones / Grupos","Cierre","Shopper","Descanso","Total","Vacaciones"]).map(r=><option key={r}>{r}</option>)}</select></label>
         <div className="time-row"><label>Entrada<input name="start" type="time" defaultValue={shiftTime(modal.person.shifts[modal.day],0,"06:00")} /></label><label>Salida<input name="end" type="time" defaultValue={shiftTime(modal.person.shifts[modal.day],1,"14:00")} /></label></div>
-        <small className="hours-preview">Las horas se calculan automáticamente. Vacaciones se registra como libre y suma 0 horas.</small>
+        <small className="hours-preview">Las horas se calculan automáticamente. Libre, Descanso y Vacaciones suman 0 horas.</small>
         <button className="primary save">Guardar turno</button>
       </form></div>}
       {create && <div className="modal-backdrop" onMouseDown={() => setCreate(null)}><form className="modal" onSubmit={e => {e.preventDefault(); void createRecord(new FormData(e.currentTarget));}} onMouseDown={e => e.stopPropagation()}>
