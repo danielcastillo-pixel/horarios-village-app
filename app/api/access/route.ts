@@ -7,6 +7,23 @@ function client(request:NextRequest) {
     global:{headers:{Authorization:`Bearer ${token}`}},auth:{persistSession:false,autoRefreshToken:false}
   });
 }
+function serviceClient() {
+  const key=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if(!key) throw new Error("Falta configurar SUPABASE_SERVICE_ROLE_KEY.");
+  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,key,{auth:{persistSession:false,autoRefreshToken:false}});
+}
+async function authenticatedUser(request:NextRequest) {
+  const token=request.headers.get("x-supabase-token")||"";
+  if(!token)return null;
+  const {data:{user}}=await serviceClient().auth.getUser(token);
+  return user;
+}
+async function requireAdmin(request:NextRequest) {
+  const user=await authenticatedUser(request);
+  if(!user)return null;
+  const {data:profile}=await serviceClient().from("profiles").select("app_role,active").eq("id",user.id).maybeSingle();
+  return profile?.app_role==="admin"&&profile?.active ? user : null;
+}
 export async function GET(request:NextRequest) {
   const db=client(request);
   const [{data,error},{data:grants,error:grantsError},{data:locations}]=await Promise.all([
@@ -53,6 +70,16 @@ export async function GET(request:NextRequest) {
 }
 export async function POST(request:NextRequest) {
   const db=client(request);const body=await request.json();
+  if(body.action==="changeOwnPassword"){
+    const user=await authenticatedUser(request);
+    const password=String(body.password||"");
+    if(!user)return NextResponse.json({error:"Sesión no válida."},{status:401});
+    if(password.length<8)return NextResponse.json({error:"La contraseña debe tener al menos 8 caracteres."},{status:400});
+    const {error}=await serviceClient().auth.admin.updateUserById(user.id,{password,app_metadata:{...(user.app_metadata||{}),must_change_password:false}});
+    if(error)return NextResponse.json({error:error.message},{status:400});
+    return NextResponse.json({ok:true});
+  }
+  if(!await requireAdmin(request))return NextResponse.json({error:"Solo el administrador puede realizar esta acción."},{status:403});
   const locationIds=[...new Set((body.locationIds||[]).map(Number).filter(Boolean))] as number[];
   if(body.action==="save"){
     const {data:user,error:findError}=await db.from("profiles").select("id").eq("email",String(body.email).toLowerCase()).maybeSingle();
@@ -81,6 +108,15 @@ export async function POST(request:NextRequest) {
     if(deleteError)return NextResponse.json({error:deleteError.message},{status:400});
     const {error:grantError}=await db.from("profile_locations").insert(locationIds.map(location_id=>({profile_id:body.id,location_id})));
     if(grantError)return NextResponse.json({error:grantError.message},{status:400});
+  } else if(body.action==="resetPassword"){
+    const service=serviceClient();
+    const {data:{user},error:findError}=await service.auth.admin.getUserById(String(body.id||""));
+    if(findError||!user)return NextResponse.json({error:"No se encontró la cuenta de acceso."},{status:404});
+    const values=new Uint32Array(1);crypto.getRandomValues(values);
+    const temporaryPassword=`Tipti-${String(values[0]%1000000).padStart(6,"0")}`;
+    const {error}=await service.auth.admin.updateUserById(user.id,{password:temporaryPassword,app_metadata:{...(user.app_metadata||{}),must_change_password:true}});
+    if(error)return NextResponse.json({error:error.message},{status:400});
+    return NextResponse.json({ok:true,temporaryPassword});
   } else return NextResponse.json({error:"Acción desconocida"},{status:400});
   return NextResponse.json({ok:true});
 }
