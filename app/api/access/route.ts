@@ -15,9 +15,20 @@ export async function GET(request:NextRequest) {
     db.from("locations").select("id,name")
   ]);
   if(error)return NextResponse.json({error:error.message},{status:403});
+  const service=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.SUPABASE_SERVICE_ROLE_KEY!,{
+    auth:{persistSession:false,autoRefreshToken:false}
+  });
+  const {data:authPage}=await service.auth.admin.listUsers({page:1,perPage:1000});
+  const authById=new Map((authPage?.users||[]).map(user=>[user.id,user]));
   const safeGrants=grantsError?[]:(grants||[]);
   const locationNameById=new Map((locations||[]).map((location:any)=>[Number(location.id),location.name]));
-  return NextResponse.json({users:(data||[]).filter((x:any)=>x.app_role!=="admin").map((x:any)=>({
+  return NextResponse.json({users:(data||[]).filter((x:any)=>x.app_role!=="admin").map((x:any)=>{
+    const requestedNames=((authById.get(x.id)?.user_metadata?.requested_location_names||[]) as unknown[]).map(String).filter(Boolean);
+    const requested=requestedNames.map(name=>{
+      const match=(locations||[]).find((location:any)=>location.name===name);
+      return Number(match?.id);
+    }).filter(Boolean);
+    return ({
     id:x.id,email:x.email,name:x.full_name||x.email,role:x.app_role,location_id:x.location_id,
     location_name:locationNameById.get(Number(x.location_id))||"Sin asignar",
     location_ids:safeGrants.filter((g:any)=>g.profile_id===x.id).map((g:any)=>g.location_id).concat(
@@ -26,8 +37,10 @@ export async function GET(request:NextRequest) {
     location_names:safeGrants.filter((g:any)=>g.profile_id===x.id).map((g:any)=>locationNameById.get(Number(g.location_id))).filter(Boolean).concat(
       safeGrants.some((g:any)=>g.profile_id===x.id)||!x.location_id?[]:[locationNameById.get(Number(x.location_id))]
     ),
+    requested_location_ids:requested,
+    requested_location_names:requestedNames,
     active:x.active?1:0
-  }))});
+  })})});
 }
 export async function POST(request:NextRequest) {
   const db=client(request);const body=await request.json();
