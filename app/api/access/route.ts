@@ -15,11 +15,20 @@ export async function GET(request:NextRequest) {
     db.from("locations").select("id,name")
   ]);
   if(error)return NextResponse.json({error:error.message},{status:403});
-  const service=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.SUPABASE_SERVICE_ROLE_KEY!,{
-    auth:{persistSession:false,autoRefreshToken:false}
-  });
-  const {data:authPage}=await service.auth.admin.listUsers({page:1,perPage:1000});
-  const authById=new Map((authPage?.users||[]).map(user=>[user.id,user]));
+  const authById=new Map<string,{user_metadata?:Record<string,unknown>}>();
+  const serviceKey=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if(serviceKey){
+    try {
+      const service=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,serviceKey,{
+        auth:{persistSession:false,autoRefreshToken:false}
+      });
+      const {data:authPage}=await service.auth.admin.listUsers({page:1,perPage:1000});
+      (authPage?.users||[]).forEach(user=>authById.set(user.id,user));
+    } catch {
+      // La administración de accesos debe seguir disponible aunque falle
+      // temporalmente la lectura de metadatos de Auth.
+    }
+  }
   const safeGrants=grantsError?[]:(grants||[]);
   const locationNameById=new Map((locations||[]).map((location:any)=>[Number(location.id),location.name]));
   return NextResponse.json({users:(data||[]).filter((x:any)=>x.app_role!=="admin").map((x:any)=>{
