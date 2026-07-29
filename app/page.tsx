@@ -13,7 +13,7 @@ type SupervisorRow = { id:number; name:string; location_id:number; location_name
 type AssignmentRow = { id:number; supervisor_id:number; work_date:string; start_time:string|null; end_time:string|null; role_id:number; role_name:string; color:Shift["tone"]; hours:number };
 type CurrentUser = { email:string; name:string; role:"admin"|"supervisor"; locationId:number|null; locationIds:number[] };
 type DataSet = { locations:LocationRow[]; roles:RoleRow[]; supervisors:SupervisorRow[]; assignments:AssignmentRow[]; currentUser:CurrentUser };
-type AccessUserRow = { id:number; email:string; name:string; role:string; location_id:number; location_name:string; location_ids:number[]; location_names:string[]; requested_location_ids:number[]; requested_location_names:string[]; active:number };
+type AccessUserRow = { id:string; email:string; name:string; role:string; location_id:number; location_name:string; location_ids:number[]; location_names:string[]; requested_location_ids:number[]; requested_location_names:string[]; active:number };
 type ShopperRow={id:number;name:string;shopper_external_id:string|null;category:"purchase"|"delivery";employment_type:string;location_id:number;location_name:string;active:number};
 type ShopperTurnRow={id:number;staff_id:number;work_date:string;turn_code:string};
 type ShopperShiftType={id:number;code:string;label:string;start_time:string|null;end_time:string|null;category:"purchase"|"delivery"|"both";location_id:number|null;counts_opening:boolean;counts_closing:boolean;is_free:boolean};
@@ -100,6 +100,8 @@ export default function Home() {
   const [registering,setRegistering] = useState(false);
   const [loginName,setLoginName] = useState("");
   const [loginError,setLoginError] = useState("");
+  const [mustChangePassword,setMustChangePassword] = useState(false);
+  const [changingPassword,setChangingPassword] = useState(false);
   const [requestedLocationNames,setRequestedLocationNames] = useState<string[]>([]);
   const [active, setActive] = useState("Panel general");
   const [location, setLocation] = useState("Todos los locales");
@@ -118,6 +120,8 @@ export default function Home() {
   const [accessUsers, setAccessUsers] = useState<AccessUserRow[]>([]);
   const [editAccessUser, setEditAccessUser] = useState<AccessUserRow | null>(null);
   const [editAccessLocations, setEditAccessLocations] = useState<number[]>([]);
+  const [resettingAccessId,setResettingAccessId]=useState<string|null>(null);
+  const [temporaryAccess,setTemporaryAccess]=useState<{name:string;email:string;password:string}|null>(null);
   const scheduleRef=useRef<HTMLElement|null>(null);
   const [shopperCategory,setShopperCategory]=useState<"purchase"|"delivery">("purchase");
   const [shopperStaff,setShopperStaff]=useState<ShopperRow[]>([]);
@@ -186,10 +190,12 @@ export default function Home() {
   useEffect(() => {
     supabase.auth.getSession().then(({data:{session}}) => {
       setSessionReady(true);
+      setMustChangePassword(Boolean(session?.user.app_metadata?.must_change_password));
       if (session) void loadData(); else setAccessState("signin");
     });
     const {data:{subscription}} = supabase.auth.onAuthStateChange((_event,session) => {
       setSessionReady(true);
+      setMustChangePassword(Boolean(session?.user.app_metadata?.must_change_password));
       if (session) { setAccessState("loading"); void loadData(); }
       else { setData(null); setAccessState("signin"); }
     });
@@ -680,6 +686,34 @@ export default function Home() {
     }
   }
 
+  async function resetAccessPassword(user:AccessUserRow) {
+    if(resettingAccessId)return;
+    if(!window.confirm(`¿Generar una contraseña temporal para ${user.name}? La contraseña actual dejará de funcionar.`))return;
+    setResettingAccessId(user.id);
+    const response=await apiFetch("/api/access",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"resetPassword",id:user.id})});
+    const result=await response.json().catch(()=>({error:"No se pudo restablecer la contraseña"})) as {error?:string;temporaryPassword?:string};
+    setResettingAccessId(null);
+    if(!response.ok||!result.temporaryPassword){setNotice(`Error: ${result.error??"No se pudo restablecer la contraseña"}`);return;}
+    setTemporaryAccess({name:user.name,email:user.email,password:result.temporaryPassword});
+  }
+
+  async function changeTemporaryPassword(event:React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form=new FormData(event.currentTarget);
+    const password=String(form.get("password")||""),confirmation=String(form.get("confirmation")||"");
+    setLoginError("");
+    if(password.length<8){setLoginError("La nueva contraseña debe tener al menos 8 caracteres.");return;}
+    if(password!==confirmation){setLoginError("Las contraseñas no coinciden.");return;}
+    setChangingPassword(true);
+    const response=await apiFetch("/api/access",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"changeOwnPassword",password})});
+    const result=await response.json().catch(()=>({error:"No se pudo cambiar la contraseña"})) as {error?:string};
+    setChangingPassword(false);
+    if(!response.ok){setLoginError(result.error??"No se pudo cambiar la contraseña.");return;}
+    await supabase.auth.refreshSession();
+    setMustChangePassword(false);
+    setNotice("✓ Contraseña personal guardada correctamente");
+  }
+
   async function submitLogin(event:React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); setLoginError("");
     if (registering) {
@@ -699,6 +733,7 @@ export default function Home() {
   if (!sessionReady || accessState === "loading") return <main className="access-gate"><div className="gate-card"><span className="gate-mark">T</span><h1>Verificando acceso</h1><p>Estamos validando tu cuenta y permisos.</p></div></main>;
   if (accessState === "signin") return <main className="access-gate"><form className="gate-card login-form" onSubmit={submitLogin}><span className="gate-mark">T</span><h1>Acceso privado</h1><p>{registering?"Crea tu cuenta y solicita tus locales":"Ingresa con tu correo y contraseña."}</p>{registering&&<><label>Nombre completo<input value={loginName} onChange={e=>setLoginName(e.target.value)} required /></label><fieldset className="signup-locations"><legend>Locales solicitados</legend>{locations.slice(1).map(local=><label key={local}><input type="checkbox" checked={requestedLocationNames.includes(local)} onChange={e=>setRequestedLocationNames(names=>e.target.checked?[...names,local]:names.filter(name=>name!==local))} /><span>{local}</span></label>)}</fieldset></>}<label>Correo<input type="email" value={loginEmail} onChange={e=>setLoginEmail(e.target.value)} required /></label><label>Contraseña<input type="password" minLength={8} value={loginPassword} onChange={e=>setLoginPassword(e.target.value)} required /></label>{loginError&&<small className="login-error">{loginError}</small>}<button className="primary gate-action">{registering?"Enviar solicitud":"Iniciar sesión"}</button><button type="button" className="secondary gate-action" onClick={()=>{setRegistering(!registering);setLoginError("");setRequestedLocationNames([])}}>{registering?"Ya tengo cuenta":"Crear cuenta"}</button></form></main>;
   if (accessState === "denied") return <main className="access-gate"><div className="gate-card denied"><span className="gate-mark">×</span><h1>Acceso no autorizado</h1><p>Tu cuenta todavía no fue activada o fue bloqueada.</p><button className="secondary gate-action" onClick={()=>supabase.auth.signOut()}>Cambiar de cuenta</button></div></main>;
+  if (mustChangePassword) return <main className="access-gate"><form className="gate-card login-form password-change-card" onSubmit={changeTemporaryPassword}><span className="gate-mark">🔒</span><h1>Crea tu contraseña</h1><p>Ingresaste con una contraseña temporal. Por seguridad, debes reemplazarla antes de continuar.</p><label>Nueva contraseña<input name="password" type="password" minLength={8} autoComplete="new-password" required /></label><label>Confirmar contraseña<input name="confirmation" type="password" minLength={8} autoComplete="new-password" required /></label>{loginError&&<small className="login-error">{loginError}</small>}<button className="primary gate-action" disabled={changingPassword}>{changingPassword?"Guardando…":"Guardar y continuar"}</button><button type="button" className="secondary gate-action" onClick={()=>supabase.auth.signOut()}>Cambiar de cuenta</button></form></main>;
 
   const isAdmin = data?.currentUser.role === "admin";
   const visibleNav = isAdmin ? adminNav : supervisorNav;
@@ -836,6 +871,7 @@ export default function Home() {
               <strong>{user.name}{pending&&<small className="pending-badge">Pendiente</small>}</strong><span>{user.email}</span><span>{pending&&user.requested_location_names.length ? `Solicita: ${user.requested_location_names.join(", ")}` : user.location_names.length ? user.location_names.join(", ") : "Sin asignar"}</span>
               <div className="access-actions">
                 <button className="access-edit" onClick={()=>{setEditAccessUser(user);setEditAccessLocations(user.location_ids.length?user.location_ids:user.requested_location_ids)}}>{pending?"Revisar solicitud":"Editar"}</button>
+                {!pending&&<button className="access-reset" disabled={resettingAccessId===user.id} onClick={()=>void resetAccessPassword(user)}>{resettingAccessId===user.id?"Generando…":"Restablecer clave"}</button>}
                 {!pending&&<button className={user.active===1?"access-active":"access-blocked"} onClick={()=>void toggleAccessUser(user)}>{user.active===1?"Bloquear":"Reactivar"}</button>}
               </div>
             </div>}) : <div className="empty-report">Todavía no has registrado supervisores con acceso.</div>}
@@ -861,6 +897,7 @@ export default function Home() {
         <label>Estado<select name="active" defaultValue={editAccessUser.active===0&&!editAccessUser.location_ids.length?1:editAccessUser.active}><option value={1}>Activo</option><option value={0}>Bloqueado</option></select></label>
         <button className="primary save" disabled={!editAccessLocations.length}>{editAccessUser.active===0&&!editAccessUser.location_ids.length?"Aprobar acceso":"Guardar cambios"}</button>
       </form></div>}
+      {temporaryAccess&&<div className="modal-backdrop" onMouseDown={()=>setTemporaryAccess(null)}><div className="modal temporary-password-modal" role="dialog" aria-modal="true" aria-labelledby="temporary-password-title" onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" onClick={()=>setTemporaryAccess(null)}>×</button><span className="temporary-key-icon">⚿</span><span className="modal-kicker">CONTRASEÑA TEMPORAL</span><h2 id="temporary-password-title">{temporaryAccess.name}</h2><p>Comparte estos datos de forma privada. La contraseña se mostrará únicamente en esta ventana y el usuario deberá cambiarla al ingresar.</p><div className="temporary-credential"><small>Correo</small><strong>{temporaryAccess.email}</strong></div><div className="temporary-credential password"><small>Contraseña temporal</small><code>{temporaryAccess.password}</code><button type="button" onClick={async()=>{await navigator.clipboard.writeText(temporaryAccess.password);setNotice("✓ Contraseña temporal copiada")}}>Copiar</button></div><button type="button" className="primary save" onClick={()=>setTemporaryAccess(null)}>Entendido, cerrar</button></div></div>}
       {modal && <div className="modal-backdrop" onMouseDown={() => setModal(null)}><form className="modal" onSubmit={e => {e.preventDefault(); saveShift(new FormData(e.currentTarget));}} onMouseDown={e => e.stopPropagation()}>
         <button type="button" className="close" onClick={() => setModal(null)}>×</button>
         <span className="modal-kicker">EDITAR ASIGNACIÓN</span><h2>{modal.person.name}</h2><p>{days[modal.day]} · {modal.person.location}</p>
