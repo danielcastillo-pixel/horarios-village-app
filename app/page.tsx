@@ -78,8 +78,13 @@ async function downloadWorkbook97(workbook:XLSX.WorkBook,filename:string) {
   const blob=new Blob([bytes],{type:"application/vnd.ms-excel"});
   const file=new File([blob],filename,{type:"application/vnd.ms-excel"});
   if(navigator.share&&navigator.canShare?.({files:[file]})){
-    await navigator.share({files:[file],title:"Reporte de horarios"});
-    return;
+    try{
+      await navigator.share({files:[file],title:"Reporte de horarios"});
+      return;
+    }catch(error){
+      if(error instanceof DOMException&&error.name==="AbortError")throw error;
+      console.warn("El navegador no permitió compartir el Excel; se usará la descarga directa.",error);
+    }
   }
   const url=URL.createObjectURL(blob);
   const link=document.createElement("a");
