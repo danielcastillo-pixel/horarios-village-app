@@ -32,7 +32,19 @@ export async function GET(request:NextRequest){
 export async function POST(request:NextRequest){
   const db=client(request),body=await request.json();
   if(body.action==="addStaff"){
-    const {error}=await db.from("shopper_staff").insert({name:String(body.name).trim(),shopper_external_id:String(body.shopperId||"").trim()||null,category:body.category,employment_type:body.employmentType,location_id:body.locationId});
+    const shopperId=String(body.shopperId||"").trim();
+    const {data:existing,error:findError}=await db.from("shopper_staff").select("id,active").eq("shopper_external_id",shopperId).maybeSingle();
+    if(findError)return NextResponse.json({error:findError.message},{status:400});
+    if(existing?.active)return NextResponse.json({error:"Este ID de shopper ya está registrado y activo."},{status:400});
+    if(existing){
+      const {error}=await db.from("shopper_staff").update({
+        name:String(body.name).trim(),category:body.category,employment_type:body.employmentType,
+        location_id:body.locationId,active:true
+      }).eq("id",existing.id);
+      if(error)return NextResponse.json({error:error.message},{status:400});
+      return NextResponse.json({ok:true,restored:true});
+    }
+    const {error}=await db.from("shopper_staff").insert({name:String(body.name).trim(),shopper_external_id:shopperId||null,category:body.category,employment_type:body.employmentType,location_id:body.locationId});
     if(error)return NextResponse.json({error:error.message},{status:400});
   }else if(body.action==="updateStaff"){
     const {error}=await db.from("shopper_staff").update({name:String(body.name).trim(),shopper_external_id:String(body.shopperId||"").trim()||null}).eq("id",body.id);
@@ -40,8 +52,6 @@ export async function POST(request:NextRequest){
   }else if(body.action==="deleteStaff"){
     const staffId=Number(body.id);
     if(!Number.isFinite(staffId))return NextResponse.json({error:"Shopper inválido"},{status:400});
-    const {error:turnError}=await db.from("shopper_turns").delete().eq("staff_id",staffId);
-    if(turnError)return NextResponse.json({error:turnError.message},{status:400});
     const {error}=await db.from("shopper_staff").update({active:false}).eq("id",staffId);
     if(error)return NextResponse.json({error:error.message},{status:400});
   }else if(body.action==="addShiftType"){
