@@ -37,6 +37,8 @@ const adminNav = [
 const supervisorNav = [["▣", "Horarios"],["♟", "Shoppers"],["▥", "Reportes"]];
 const UI_STATE_KEY="regional-ops-ui-state";
 const dataCacheKey=(email:string)=>`regional-ops-data-${email.toLowerCase()}`;
+const SCHEDULE_MIN_DATE="2026-07-27";
+const SCHEDULE_MAX_DATE=`${Math.max(new Date().getFullYear()+1,2027)}-12-31`;
 
 function hoursFor(person: Person) {
   return Math.round(person.shifts.reduce((total, item) => total + shiftHours(item), 0) * 100) / 100;
@@ -121,9 +123,9 @@ export default function Home() {
   const [create, setCreate] = useState<"location" | "supervisor" | "role" | null>(null);
   const [editSupervisor, setEditSupervisor] = useState<SupervisorRow | null>(null);
   const [notice, setNotice] = useState("");
-  const [weekStart, setWeekStart] = useState("2026-07-27");
+  const [weekStart, setWeekStart] = useState(SCHEDULE_MIN_DATE);
   const [reportLocation, setReportLocation] = useState("");
-  const [reportStart, setReportStart] = useState("2026-07-27");
+  const [reportStart, setReportStart] = useState(SCHEDULE_MIN_DATE);
   const [reportEnd, setReportEnd] = useState("2026-07-31");
   const [accessState, setAccessState] = useState<"loading"|"authorized"|"signin"|"denied">("loading");
   const [accessUsers, setAccessUsers] = useState<AccessUserRow[]>([]);
@@ -422,7 +424,7 @@ export default function Home() {
     if(!selectedLocation){setNotice("Selecciona un local antes de copiar la semana");return;}
     const target=new Date(`${weekStart}T12:00:00`);
     target.setDate(target.getDate()+7);
-    if(target>new Date("2026-12-31T12:00:00")){setNotice("No se puede copiar fuera del período disponible");return;}
+    if(target>new Date(`${SCHEDULE_MAX_DATE}T12:00:00`)){setNotice(`No se puede copiar después del ${SCHEDULE_MAX_DATE}`);return;}
     if(!window.confirm(`¿Copiar todos los turnos de ${location} a la semana siguiente?`))return;
     const response=await apiFetch("/api/data",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
       action:"copyWeek",locationId:selectedLocation.id,sourceStart:weekStart,targetStart:target.toISOString().slice(0,10)
@@ -488,8 +490,8 @@ export default function Home() {
   function changeWeek(offset:number) {
     const d = new Date(`${weekStart}T12:00:00`);
     d.setDate(d.getDate()+offset*7);
-    const min = new Date("2026-07-27T12:00:00"), max = new Date("2026-12-28T12:00:00");
-    if (d < min || d > max) { setNotice("El calendario disponible va hasta el 31 de diciembre de 2026"); return; }
+    const min = new Date(`${SCHEDULE_MIN_DATE}T12:00:00`), max = new Date(`${SCHEDULE_MAX_DATE}T12:00:00`);
+    if (d < min || d > max) { setNotice(`El calendario disponible va desde ${SCHEDULE_MIN_DATE} hasta ${SCHEDULE_MAX_DATE}`); return; }
     setWeekStart(d.toISOString().slice(0,10));
   }
 
@@ -662,8 +664,8 @@ export default function Home() {
     setShopperModal(null);setNotice("✓ Turno guardado");await loadShoppers();
   }
 
-  function openShopperTurnModal(staff:ShopperRow,date:string,currentCode:string){
-    setShopperTurnInput(currentCode);
+  function openShopperTurnModal(staff:ShopperRow,date:string){
+    setShopperTurnInput("");
     setShopperModal({staff,date});
   }
 
@@ -938,7 +940,7 @@ export default function Home() {
             });
             return <><div className="turn-kpis"><article><strong>{visible.length}</strong><span>Personal</span></article><article><strong>{types.filter(t=>t.counts_opening).length}</strong><span>Aperturas</span></article><article><strong>{types.filter(t=>!t.is_free&&!t.counts_opening&&!t.counts_closing).length}</strong><span>Intermedios</span></article><article><strong>{types.filter(t=>t.counts_closing).length}</strong><span>Cierres</span></article><article><strong>{types.filter(t=>t.is_free).length}</strong><span>Libres</span></article></div>
             <div className="daily-coverage"><div className="daily-coverage-head"><div><strong>Cobertura diaria</strong><span>Personal asignado por tipo de turno cada día</span></div><small>{shopperCategory==="purchase"?"Asesores de compra":"Repartidores"}</small></div><div className="daily-coverage-scroll">{daily.map(day=><article className="daily-card" key={day.date}><strong>{day.label}</strong><div><span>Apertura</span><b className="opening">{day.opening}</b></div><div><span>Intermedio</span><b className="intermediate">{day.intermediate}</b></div><div><span>Cierre</span><b className="closing">{day.closing}</b></div><div><span>Libre / Vac.</span><b className="free">{day.free}</b></div></article>)}</div></div>
-            <div className={`table-wrap shopper-scalable${visible.length>20?" shopper-table-compact":""}`}><table><thead><tr><th>{shopperCategory==="purchase"?"Asesor de compra":"Repartidor"}</th>{days.map(d=><th key={d}>{d}</th>)}<th>Aperturas</th><th>Cierres</th>{isAdmin&&<th>Horas</th>}</tr></thead><tbody>{visible.map(staff=>{const weekly=dateKeys.map(d=>shopperTurns.find(t=>t.staff_id===staff.id&&t.work_date===d)?.turn_code||"");const weeklyTypes=weekly.map(code=>shopperShiftFor(code,staff.location_id));const weeklyHours=weeklyTypes.reduce((total,type)=>total+shopperShiftHours(type),0);return <tr key={staff.id}><td><div className="person"><span className="avatar">{staff.name.split(" ").map(x=>x[0]).join("").slice(0,2)}</span><div className="person-info"><div className="shopper-name-line"><strong className="shopper-name-text">{staff.name}</strong><div className="shopper-row-actions"><button className="shopper-action edit" onClick={()=>setEditShopper(staff)} title={`Editar a ${staff.name}`} aria-label={`Editar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l11-11-4-4L4 16v4Zm12.2-16.2 4 4 1.1-1.1a1.4 1.4 0 0 0 0-2l-2-2a1.4 1.4 0 0 0-2 0l-1.1 1.1Z"/></svg></button><button className="shopper-action delete" onClick={()=>setDeleteShopper(staff)} title={`Eliminar a ${staff.name}`} aria-label={`Eliminar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8l1 2h4v2H3V5h4l1-2Zm-2 6h12l-1 12H7L6 9Zm4 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z"/></svg></button></div></div><small>{staff.employment_type} · {staff.location_name} <span className="shopper-inline-id">ID {staff.shopper_external_id||"—"}</span></small></div></div></td>{dateKeys.map((d,i)=><td key={d}><button className={`turn-code turn-${weekly[i]||"empty"}`} onClick={()=>openShopperTurnModal(staff,d,weekly[i])}>{weekly[i]||"＋"}</button></td>)}<td className="hours">{weeklyTypes.filter(t=>t?.counts_opening).length}</td><td className="hours">{weeklyTypes.filter(t=>t?.counts_closing).length}</td>{isAdmin&&<td className="hours shopper-hours">{displayHours(weeklyHours)} h</td>}</tr>})}</tbody></table></div></>
+            <div className={`table-wrap shopper-scalable${visible.length>20?" shopper-table-compact":""}`}><table><thead><tr><th>{shopperCategory==="purchase"?"Asesor de compra":"Repartidor"}</th>{days.map(d=><th key={d}>{d}</th>)}<th>Aperturas</th><th>Cierres</th>{isAdmin&&<th>Horas</th>}</tr></thead><tbody>{visible.map(staff=>{const weekly=dateKeys.map(d=>shopperTurns.find(t=>t.staff_id===staff.id&&t.work_date===d)?.turn_code||"");const weeklyTypes=weekly.map(code=>shopperShiftFor(code,staff.location_id));const weeklyHours=weeklyTypes.reduce((total,type)=>total+shopperShiftHours(type),0);return <tr key={staff.id}><td><div className="person"><span className="avatar">{staff.name.split(" ").map(x=>x[0]).join("").slice(0,2)}</span><div className="person-info"><div className="shopper-name-line"><strong className="shopper-name-text">{staff.name}</strong><div className="shopper-row-actions"><button className="shopper-action edit" onClick={()=>setEditShopper(staff)} title={`Editar a ${staff.name}`} aria-label={`Editar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l11-11-4-4L4 16v4Zm12.2-16.2 4 4 1.1-1.1a1.4 1.4 0 0 0 0-2l-2-2a1.4 1.4 0 0 0-2 0l-1.1 1.1Z"/></svg></button><button className="shopper-action delete" onClick={()=>setDeleteShopper(staff)} title={`Eliminar a ${staff.name}`} aria-label={`Eliminar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8l1 2h4v2H3V5h4l1-2Zm-2 6h12l-1 12H7L6 9Zm4 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z"/></svg></button></div></div><small>{staff.employment_type} · {staff.location_name} <span className="shopper-inline-id">ID {staff.shopper_external_id||"—"}</span></small></div></div></td>{dateKeys.map((d,i)=><td key={d}><button className={`turn-code turn-${weekly[i]||"empty"}`} onClick={()=>openShopperTurnModal(staff,d)}>{weekly[i]||"＋"}</button></td>)}<td className="hours">{weeklyTypes.filter(t=>t?.counts_opening).length}</td><td className="hours">{weeklyTypes.filter(t=>t?.counts_closing).length}</td>{isAdmin&&<td className="hours shopper-hours">{displayHours(weeklyHours)} h</td>}</tr>})}</tbody></table></div></>
           })()}</>:<div className="shopper-directory">
             <div className="directory-heading"><div><h2>Repositorio de shoppers</h2><p>Busca por ID o nombre y administra el local asignado.</p></div><span>{shopperDirectory.length} registros</span></div>
             <label className="shopper-id-search"><span>⌕</span><input value={shopperDirectoryQuery} onChange={event=>setShopperDirectoryQuery(event.target.value)} placeholder="Buscar por ID de shopper o nombre…" /></label>
@@ -967,8 +969,8 @@ export default function Home() {
           {reportType==="shopper"&&<div className="shopper-submenu report-shopper-type"><button className={shopperCategory==="purchase"?"active":""} onClick={()=>setShopperCategory("purchase")}>Asesores de compra</button><button className={shopperCategory==="delivery"?"active":""} onClick={()=>setShopperCategory("delivery")}>Repartidores</button></div>}
           <div className="report-filters">
             <label>Local<select value={reportLocation} onChange={e=>setReportLocation(e.target.value)}>{isAdmin && <option value="">Seleccionar local</option>}{data?.locations.map(l=><option key={l.id} value={l.name}>{l.name} · {l.city}</option>)}</select></label>
-            <label>Desde<input type="date" min="2026-07-27" max="2026-12-31" value={reportStart} onChange={e=>setReportStart(e.target.value)} /></label>
-            <label>Hasta<input type="date" min="2026-07-27" max="2026-12-31" value={reportEnd} onChange={e=>setReportEnd(e.target.value)} /></label>
+            <label>Desde<input type="date" min={SCHEDULE_MIN_DATE} max={SCHEDULE_MAX_DATE} value={reportStart} onChange={e=>setReportStart(e.target.value)} /></label>
+            <label>Hasta<input type="date" min={SCHEDULE_MIN_DATE} max={SCHEDULE_MAX_DATE} value={reportEnd} onChange={e=>setReportEnd(e.target.value)} /></label>
           </div>
           {reportType==="supervisor"?<><div className="report-note"><strong>{reportRows.length}</strong><span>turnos encontrados</span><strong>{displayHours(reportSummary.reduce((sum,row)=>sum+row.hours,0))} h</strong><span>horas en el período</span></div>
           <div className="report-table"><div className="report-row report-head"><span>Supervisor</span><span>Local</span><span>Horas</span><span>Días</span></div>{reportSummary.length ? reportSummary.map(s => <div className="report-row" key={s.name}><strong>{s.name}</strong><span>{reportLocation}</span><strong>{displayHours(s.hours)} h</strong><span className="ok-pill">{s.worked} trabajados · {s.free} libres</span></div>) : <div className="empty-report">Selecciona un local y el rango de fechas para revisar el resumen antes de descargarlo.</div>}</div></>:<div className="report-format-preview"><strong>Columnas del archivo</strong><span>ID_SHOPPER</span><span>MES</span><span>DIA</span><span>HORA_INICIO</span><span>HORA_FIN</span><span>DIA_LIBRE</span></div>}
