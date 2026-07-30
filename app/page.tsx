@@ -519,7 +519,7 @@ export default function Home() {
     })});
     const result=await response.json().catch(()=>({error:"No se pudo guardar"}));
     if(!response.ok){setNotice(`Error: ${result.error}`);return;}
-    setAddShopper(false);setNotice(result.restored?"✓ Shopper restaurado con el mismo ID":"✓ Persona agregada al horario");await loadShoppers();
+    setAddShopper(false);setNotice("✓ Persona agregada al horario");await loadShoppers();
   }
 
   async function updateShopper(form:FormData){
