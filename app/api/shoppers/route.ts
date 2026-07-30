@@ -6,6 +6,11 @@ function client(request:NextRequest){
 }
 export async function GET(request:NextRequest){
   const db=client(request),category=request.nextUrl.searchParams.get("category")==="delivery"?"delivery":"purchase";
+  if(request.nextUrl.searchParams.get("directory")==="1"){
+    const {data,error}=await db.from("shopper_staff").select("*,locations(name)").order("name");
+    if(error)return NextResponse.json({error:error.message},{status:400});
+    return NextResponse.json({staff:(data||[]).map((x:any)=>({...x,location_name:x.locations?.name||"",active:x.active?1:0}))});
+  }
   const [{data:staff,error},{data:turns,error:te},{data:shiftTypes}]=await Promise.all([
     db.from("shopper_staff").select("*,locations(name)").eq("category",category).eq("active",true).order("name"),
     db.from("shopper_turns").select("*").gte("work_date","2026-07-27").lte("work_date","2026-12-31"),
@@ -36,7 +41,9 @@ export async function POST(request:NextRequest){
     const {error}=await db.from("shopper_staff").insert({name:String(body.name).trim(),shopper_external_id:shopperId||null,category:body.category,employment_type:body.employmentType,location_id:body.locationId});
     if(error)return NextResponse.json({error:error.message},{status:400});
   }else if(body.action==="updateStaff"){
-    const {error}=await db.from("shopper_staff").update({name:String(body.name).trim(),shopper_external_id:String(body.shopperId||"").trim()||null}).eq("id",body.id);
+    const changes:Record<string,unknown>={name:String(body.name).trim(),shopper_external_id:String(body.shopperId||"").trim()||null};
+    if(body.locationId)changes.location_id=Number(body.locationId);
+    const {error}=await db.from("shopper_staff").update(changes).eq("id",body.id);
     if(error)return NextResponse.json({error:error.message},{status:400});
   }else if(body.action==="deleteStaff"){
     const staffId=Number(body.id);
