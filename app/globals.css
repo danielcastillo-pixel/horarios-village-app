@@ -157,3 +157,5 @@ th:first-child { z-index:2; background:#fbfcfd; padding-left:12px; }
   .modal-backdrop{place-items:start center;padding:10px}.modal{max-height:calc(100dvh - 20px);padding:24px 20px;border-radius:13px}.close{top:-13px;margin-right:-3px}.time-row{grid-template-columns:1fr}.confirm-actions{grid-template-columns:1fr}.shopper-row-actions{opacity:1;transform:none}.shopper-action{width:29px;height:29px;flex-basis:29px}
 }
 @media print{.sidebar,.header-actions,.toolbar,.copy{display:none!important}.app-shell{display:block}.workspace{padding:0}.schedule-card{border:0}.kpis{break-inside:avoid}}
+
+/* Build trigger: shopper schedule usability update */
