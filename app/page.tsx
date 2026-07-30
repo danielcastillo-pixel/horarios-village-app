@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type {CSSProperties} from "react";
 import { supabase } from "@/lib/supabase";
 import { toPng } from "html-to-image";
 import * as XLSX from "xlsx";
@@ -35,6 +36,8 @@ const adminNav = [
   ["◫", "Turnos y roles"], ["♟", "Shoppers"], ["⌂", "Locales"], ["▥", "Reportes"], ["⚿", "Accesos"]
 ];
 const supervisorNav = [["▣", "Horarios"],["♟", "Shoppers"],["▥", "Reportes"]];
+const UI_STATE_KEY="regional-ops-ui-state";
+const dataCacheKey=(email:string)=>`regional-ops-data-${email.toLowerCase()}`;
 
 function hoursFor(person: Person) {
   return Math.round(person.shifts.reduce((total, item) => total + shiftHours(item), 0) * 100) / 100;
@@ -132,6 +135,7 @@ export default function Home() {
   const scheduleRef=useRef<HTMLElement|null>(null);
   const [shopperCategory,setShopperCategory]=useState<"purchase"|"delivery">("purchase");
   const [shopperView,setShopperView]=useState<"schedule"|"directory">("schedule");
+  const [shopperZoom,setShopperZoom]=useState(100);
   const [shopperStaff,setShopperStaff]=useState<ShopperRow[]>([]);
   const [shopperDirectory,setShopperDirectory]=useState<ShopperRow[]>([]);
   const [shopperDirectoryQuery,setShopperDirectoryQuery]=useState("");
@@ -152,6 +156,7 @@ export default function Home() {
   const [presenceTime,setPresenceTime]=useState(currentLocalTime);
   const [presenceTypes,setPresenceTypes]=useState<PresenceType[]>(["supervisor","purchase","delivery"]);
   const [presenceSearched,setPresenceSearched]=useState(false);
+  const [uiStateReady,setUiStateReady]=useState(false);
 
   const dateKeys = useMemo(() => Array.from({length:7},(_,i) => {
     const d = new Date(`${weekStart}T12:00:00`);
@@ -175,6 +180,14 @@ export default function Home() {
     return fetch(path,{...init,headers});
   }
 
+  async function signOutSafely(){
+    try{
+      if(data?.currentUser.email)window.localStorage.removeItem(dataCacheKey(data.currentUser.email));
+    }catch{}
+    setMobileMenuOpen(false);
+    await supabase.auth.signOut();
+  }
+
   async function loadData() {
     try {
       const response = await apiFetch("/api/data");
@@ -188,29 +201,67 @@ export default function Home() {
       const payload = await response.json() as DataSet;
       setData(payload);
       setAccessState("authorized");
+      try{window.localStorage.setItem(dataCacheKey(payload.currentUser.email),JSON.stringify(payload));}catch{}
       setPresenceLocation(current=>current||payload.locations[0]?.name||"");
       if (payload.currentUser.role === "supervisor" && payload.locations[0]) {
-        setLocation(payload.locations[0].name);
-        setReportLocation(payload.locations[0].name);
-        setActive("Horarios");
+        setLocation(current=>payload.locations.some(item=>item.name===current)?current:payload.locations[0].name);
+        setReportLocation(current=>payload.locations.some(item=>item.name===current)?current:payload.locations[0].name);
+        setActive(current=>supervisorNav.some(([,label])=>label===current)?current:"Horarios");
       }
     } catch { setNotice("No se pudo conectar con el almacenamiento. Intenta nuevamente."); }
   }
 
   useEffect(() => {
+    try{
+      const saved=JSON.parse(window.localStorage.getItem(UI_STATE_KEY)||"{}") as {
+        active?:string;location?:string;weekStart?:string;shopperCategory?:"purchase"|"delivery";
+        shopperView?:"schedule"|"directory";shopperZoom?:number;reportType?:"supervisor"|"shopper";
+        reportLocation?:string;reportStart?:string;reportEnd?:string;
+      };
+      if(saved.active)setActive(saved.active);
+      if(saved.location)setLocation(saved.location);
+      if(saved.weekStart)setWeekStart(saved.weekStart);
+      if(saved.shopperCategory)setShopperCategory(saved.shopperCategory);
+      if(saved.shopperView)setShopperView(saved.shopperView);
+      if(saved.shopperZoom&&saved.shopperZoom>=70&&saved.shopperZoom<=130)setShopperZoom(saved.shopperZoom);
+      if(saved.reportType)setReportType(saved.reportType);
+      if(saved.reportLocation)setReportLocation(saved.reportLocation);
+      if(saved.reportStart)setReportStart(saved.reportStart);
+      if(saved.reportEnd)setReportEnd(saved.reportEnd);
+    }catch{}
+    setUiStateReady(true);
     supabase.auth.getSession().then(({data:{session}}) => {
       setSessionReady(true);
       setMustChangePassword(Boolean(session?.user.app_metadata?.must_change_password));
-      if (session) void loadData(); else setAccessState("signin");
+      if(session){
+        try{
+          const cached=window.localStorage.getItem(dataCacheKey(session.user.email||""));
+          if(cached){setData(JSON.parse(cached) as DataSet);setAccessState("authorized");}
+        }catch{}
+        void loadData();
+      }else setAccessState("signin");
     });
     const {data:{subscription}} = supabase.auth.onAuthStateChange((event,session) => {
       setSessionReady(true);
       setMustChangePassword(event==="PASSWORD_RECOVERY"||Boolean(session?.user.app_metadata?.must_change_password));
-      if (session) { setAccessState("loading"); void loadData(); }
+      if(session){
+        try{
+          const cached=window.localStorage.getItem(dataCacheKey(session.user.email||""));
+          if(cached){setData(JSON.parse(cached) as DataSet);setAccessState("authorized");}
+          else setAccessState("loading");
+        }catch{setAccessState("loading");}
+        void loadData();
+      }
       else { setData(null); setAccessState("signin"); }
     });
     return () => subscription.unsubscribe();
   }, []);
+  useEffect(()=>{
+    if(!uiStateReady)return;
+    try{window.localStorage.setItem(UI_STATE_KEY,JSON.stringify({
+      active,location,weekStart,shopperCategory,shopperView,shopperZoom,reportType,reportLocation,reportStart,reportEnd
+    }));}catch{}
+  },[uiStateReady,active,location,weekStart,shopperCategory,shopperView,shopperZoom,reportType,reportLocation,reportStart,reportEnd]);
   useEffect(() => {
     setSidebarCollapsed(window.localStorage.getItem("regional-sidebar-collapsed") === "true");
   }, []);
@@ -594,6 +645,14 @@ export default function Home() {
     return "Intermedio";
   }
 
+  function shopperShiftHours(shiftType:ShopperShiftType|undefined){
+    if(!shiftType||shiftType.is_free||!shiftType.start_time||!shiftType.end_time)return 0;
+    const minutes=(value:string)=>{const [hours,rest]=value.slice(0,5).split(":").map(Number);return hours*60+rest;};
+    let difference=minutes(shiftType.end_time)-minutes(shiftType.start_time);
+    if(difference<0)difference+=24*60;
+    return difference/60;
+  }
+
   async function saveShopperTurn(code:string){
     if(!shopperModal)return;
     const response=await apiFetch("/api/shoppers",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
@@ -621,16 +680,21 @@ export default function Home() {
     const visible=shopperStaff.filter(s=>s.location_id===selected.id);
     if(!visible.length){setNotice("No existen personas en el local seleccionado");return;}
     const node=document.createElement("section");
-    node.className="shopper-export-sheet";
-    node.innerHTML=`<div class="shopper-export-head"><h2>${shopperCategory==="purchase"?"Asesores de compra":"Repartidores"}</h2><p>${selected.name} · ${weekLabel}</p></div><table><thead><tr><th>Nombre</th>${days.map(day=>`<th>${day}</th>`).join("")}</tr></thead><tbody>${visible.map(staff=>`<tr><td>${excelEscape(staff.name)}</td>${dateKeys.map(date=>{const code=shopperTurns.find(t=>t.staff_id===staff.id&&t.work_date===date)?.turn_code||"";const type=shopperShiftFor(code,staff.location_id);return `<td><b>${excelEscape(code||"—")}</b><span>${excelEscape(shopperShiftLabel(type))}</span></td>`}).join("")}</tr>`).join("")}</tbody></table>`;
+    node.className=`shopper-export-sheet${visible.length>20?" compact":""}`;
+    node.innerHTML=`<div class="shopper-export-head"><h2>${shopperCategory==="purchase"?"Asesores de compra":"Repartidores"}</h2><p>${selected.name} · ${weekLabel}</p></div><table><thead><tr><th>Nombre / ID</th>${days.map(day=>`<th>${day}</th>`).join("")}</tr></thead><tbody>${visible.map(staff=>`<tr><td><b>${excelEscape(staff.name)}</b><span>ID: ${excelEscape(staff.shopper_external_id||"Sin ID")}</span></td>${dateKeys.map(date=>{const code=shopperTurns.find(t=>t.staff_id===staff.id&&t.work_date===date)?.turn_code||"";const type=shopperShiftFor(code,staff.location_id);return `<td><b>${excelEscape(code||"—")}</b><span>${excelEscape(shopperShiftLabel(type))}</span></td>`}).join("")}</tr>`).join("")}</tbody></table>`;
     document.body.appendChild(node);
     try{
       const dataUrl=await toPng(node,{cacheBust:true,pixelRatio:2,backgroundColor:"#ffffff",width:node.scrollWidth,height:node.scrollHeight});
       const blob=await fetch(dataUrl).then(response=>response.blob());
       const filename=`Horario_${shopperCategory==="purchase"?"Compra":"Repartidores"}_${selected.name.replace(/[^a-z0-9]+/gi,"_")}_${weekStart}.png`;
       const file=new File([blob],filename,{type:"image/png"});
-      if(navigator.share&&navigator.canShare?.({files:[file]}))await navigator.share({files:[file],title:"Horario de shoppers"});
-      else{const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download=filename;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+      if(navigator.share&&navigator.canShare?.({files:[file]})){
+        try{await navigator.share({files:[file],title:"Horario de shoppers"});}
+        catch(error){
+          if(error instanceof DOMException&&error.name==="AbortError")throw error;
+          const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download=filename;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+        }
+      }else{const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download=filename;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
       setNotice("✓ Imagen del horario generada correctamente");
     }catch(error){
       if(!(error instanceof DOMException&&error.name==="AbortError"))setNotice("Error: no se pudo generar la imagen");
@@ -764,8 +828,8 @@ export default function Home() {
 
   if (!sessionReady || accessState === "loading") return <main className="access-gate"><div className="gate-card"><span className="gate-mark">T</span><h1>Verificando acceso</h1><p>Estamos validando tu cuenta y permisos.</p></div></main>;
   if (accessState === "signin") return <main className="access-gate">{recoveringPassword?<form className="gate-card login-form recovery-form" onSubmit={requestPasswordRecovery}><span className="gate-mark">⚿</span><h1>Recuperar contraseña</h1><p>Escribe el correo de tu cuenta y te enviaremos un enlace para crear una contraseña nueva.</p><label>Correo<input type="email" value={loginEmail} onChange={e=>setLoginEmail(e.target.value)} autoComplete="email" required /></label>{loginError&&<small className={loginError.startsWith("✓")?"login-success":"login-error"}>{loginError}</small>}<button className="primary gate-action" disabled={sendingRecovery}>{sendingRecovery?"Enviando…":"Enviar enlace de recuperación"}</button><button type="button" className="secondary gate-action" onClick={()=>{setRecoveringPassword(false);setLoginError("")}}>Volver a iniciar sesión</button></form>:<form className="gate-card login-form" onSubmit={submitLogin}><span className="gate-mark">T</span><h1>Acceso privado</h1><p>{registering?"Crea tu cuenta y solicita tus locales":"Ingresa con tu correo y contraseña."}</p>{registering&&<><label>Nombre completo<input value={loginName} onChange={e=>setLoginName(e.target.value)} required /></label><fieldset className="signup-locations"><legend>Locales solicitados</legend>{locations.slice(1).map(local=><label key={local}><input type="checkbox" checked={requestedLocationNames.includes(local)} onChange={e=>setRequestedLocationNames(names=>e.target.checked?[...names,local]:names.filter(name=>name!==local))} /><span>{local}</span></label>)}</fieldset></>}<label>Correo<input type="email" value={loginEmail} onChange={e=>setLoginEmail(e.target.value)} required /></label><label>Contraseña<input type="password" minLength={8} value={loginPassword} onChange={e=>setLoginPassword(e.target.value)} required /></label>{!registering&&<button type="button" className="forgot-password" onClick={()=>{setRecoveringPassword(true);setLoginError("")}}>¿Olvidaste tu contraseña?</button>}{loginError&&<small className="login-error">{loginError}</small>}<button className="primary gate-action">{registering?"Enviar solicitud":"Iniciar sesión"}</button><button type="button" className="secondary gate-action" onClick={()=>{setRegistering(!registering);setLoginError("");setRequestedLocationNames([])}}>{registering?"Ya tengo cuenta":"Crear cuenta"}</button></form>}</main>;
-  if (accessState === "denied") return <main className="access-gate"><div className="gate-card denied"><span className="gate-mark">×</span><h1>Acceso no autorizado</h1><p>Tu cuenta todavía no fue activada o fue bloqueada.</p><button className="secondary gate-action" onClick={()=>supabase.auth.signOut()}>Cambiar de cuenta</button></div></main>;
-  if (mustChangePassword) return <main className="access-gate"><form className="gate-card login-form password-change-card" onSubmit={changeTemporaryPassword}><span className="gate-mark">🔒</span><h1>Crea tu contraseña</h1><p>Ingresaste con una contraseña temporal. Por seguridad, debes reemplazarla antes de continuar.</p><label>Nueva contraseña<input name="password" type="password" minLength={8} autoComplete="new-password" required /></label><label>Confirmar contraseña<input name="confirmation" type="password" minLength={8} autoComplete="new-password" required /></label>{loginError&&<small className="login-error">{loginError}</small>}<button className="primary gate-action" disabled={changingPassword}>{changingPassword?"Guardando…":"Guardar y continuar"}</button><button type="button" className="secondary gate-action" onClick={()=>supabase.auth.signOut()}>Cambiar de cuenta</button></form></main>;
+  if (accessState === "denied") return <main className="access-gate"><div className="gate-card denied"><span className="gate-mark">×</span><h1>Acceso no autorizado</h1><p>Tu cuenta todavía no fue activada o fue bloqueada.</p><button className="secondary gate-action" onClick={()=>void signOutSafely()}>Cambiar de cuenta</button></div></main>;
+  if (mustChangePassword) return <main className="access-gate"><form className="gate-card login-form password-change-card" onSubmit={changeTemporaryPassword}><span className="gate-mark">🔒</span><h1>Crea tu contraseña</h1><p>Ingresaste con una contraseña temporal. Por seguridad, debes reemplazarla antes de continuar.</p><label>Nueva contraseña<input name="password" type="password" minLength={8} autoComplete="new-password" required /></label><label>Confirmar contraseña<input name="confirmation" type="password" minLength={8} autoComplete="new-password" required /></label>{loginError&&<small className="login-error">{loginError}</small>}<button className="primary gate-action" disabled={changingPassword}>{changingPassword?"Guardando…":"Guardar y continuar"}</button><button type="button" className="secondary gate-action" onClick={()=>void signOutSafely()}>Cambiar de cuenta</button></form></main>;
 
   const isAdmin = data?.currentUser.role === "admin";
   const visibleNav = isAdmin ? adminNav : supervisorNav;
@@ -789,7 +853,7 @@ export default function Home() {
         <div className="brand"><span>TIPTI · OPERACIONES</span><strong>Región Intercity</strong></div>
         <nav>{visibleNav.map(([icon,label]) => <button key={label} title={sidebarCollapsed?label:undefined} className={active === label ? "active" : ""} onClick={() => {setActive(label);setMobileMenuOpen(false)}}><i>{icon}</i><span>{label}</span></button>)}</nav>
         <div className="profile"><div className="avatar admin">{data?.currentUser.name.split(" ").map(x=>x[0]).join("").slice(0,2).toUpperCase()}</div><div><strong>{data?.currentUser.name}</strong><span>{isAdmin?"Administrador total":"Supervisor de local"}</span></div></div>
-        <button className="logout" onClick={() => {setMobileMenuOpen(false);void supabase.auth.signOut()}}>↪ Cerrar sesión</button>
+        <button className="logout" onClick={() => void signOutSafely()}>↪ Cerrar sesión</button>
         {isAdmin && <button className="settings" onClick={() => {setActive("Configuración");setMobileMenuOpen(false)}}>⚙ Configuración</button>}
       </aside>
 
@@ -849,6 +913,7 @@ export default function Home() {
           {shopperView==="schedule"?<>
           <div className="schedule-title"><div><h2>Horario de shoppers</h2><p>Programación por turnos del personal de tus locales asignados.</p></div><div className="schedule-actions shopper-actions"><button className="schedule-action-button" onClick={()=>setAddShopper(true)}>＋ Agregar fila</button><button className="schedule-action-button" onClick={()=>setAddShopperShift(true)}>＋ Crear turno</button><button className="schedule-action-button" onClick={()=>void copyShopperWeek()}>▣ Copiar semana</button><button className="schedule-action-button image-action" onClick={()=>void downloadShopperImage()}>▧ Descargar imagen</button></div></div>
           <div className="shopper-submenu"><button className={shopperCategory==="purchase"?"active":""} onClick={()=>setShopperCategory("purchase")}>Asesores de compra</button><button className={shopperCategory==="delivery"?"active":""} onClick={()=>setShopperCategory("delivery")}>Repartidores</button></div>
+          <div className="shopper-zoom-control" aria-label="Tamaño del horario"><span>🔍 Tamaño</span><button onClick={()=>setShopperZoom(value=>Math.max(70,value-10))} disabled={shopperZoom<=70} aria-label="Reducir horario">−</button><strong>{shopperZoom}%</strong><button onClick={()=>setShopperZoom(value=>Math.min(130,value+10))} disabled={shopperZoom>=130} aria-label="Ampliar horario">＋</button></div>
           <div className="toolbar"><div className="week"><button onClick={()=>changeWeek(-1)}>‹</button><strong>{weekLabel}</strong><button onClick={()=>changeWeek(1)}>›</button></div><select value={location} onChange={e=>setLocation(e.target.value)}>{isAdmin&&<option>Todos los locales</option>}{data?.locations.map(l=><option key={l.id}>{l.name}</option>)}</select></div>
           {(()=>{
             const visible=shopperStaff.filter(s=>location==="Todos los locales"||s.location_name===location);
@@ -859,7 +924,7 @@ export default function Home() {
             });
             return <><div className="turn-kpis"><article><strong>{visible.length}</strong><span>Personal</span></article><article><strong>{types.filter(t=>t.counts_opening).length}</strong><span>Aperturas</span></article><article><strong>{types.filter(t=>!t.is_free&&!t.counts_opening&&!t.counts_closing).length}</strong><span>Intermedios</span></article><article><strong>{types.filter(t=>t.counts_closing).length}</strong><span>Cierres</span></article><article><strong>{types.filter(t=>t.is_free).length}</strong><span>Libres</span></article></div>
             <div className="daily-coverage"><div className="daily-coverage-head"><div><strong>Cobertura diaria</strong><span>Personal asignado por tipo de turno cada día</span></div><small>{shopperCategory==="purchase"?"Asesores de compra":"Repartidores"}</small></div><div className="daily-coverage-scroll">{daily.map(day=><article className="daily-card" key={day.date}><strong>{day.label}</strong><div><span>Apertura</span><b className="opening">{day.opening}</b></div><div><span>Intermedio</span><b className="intermediate">{day.intermediate}</b></div><div><span>Cierre</span><b className="closing">{day.closing}</b></div><div><span>Libre / Vac.</span><b className="free">{day.free}</b></div></article>)}</div></div>
-            <div className="table-wrap"><table><thead><tr><th>{shopperCategory==="purchase"?"Asesor de compra":"Repartidor"}</th>{days.map(d=><th key={d}>{d}</th>)}<th>Aperturas</th><th>Cierres</th></tr></thead><tbody>{visible.map(staff=>{const weekly=dateKeys.map(d=>shopperTurns.find(t=>t.staff_id===staff.id&&t.work_date===d)?.turn_code||"");const weeklyTypes=weekly.map(code=>shopperShiftFor(code,staff.location_id));return <tr key={staff.id}><td><div className="person"><span className="avatar">{staff.name.split(" ").map(x=>x[0]).join("").slice(0,2)}</span><div className="person-info"><div className="shopper-name-line"><strong className="shopper-name-text">{staff.name}</strong><div className="shopper-row-actions"><button className="shopper-action edit" onClick={()=>setEditShopper(staff)} title={`Editar a ${staff.name}`} aria-label={`Editar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l11-11-4-4L4 16v4Zm12.2-16.2 4 4 1.1-1.1a1.4 1.4 0 0 0 0-2l-2-2a1.4 1.4 0 0 0-2 0l-1.1 1.1Z"/></svg></button><button className="shopper-action delete" onClick={()=>setDeleteShopper(staff)} title={`Eliminar a ${staff.name}`} aria-label={`Eliminar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8l1 2h4v2H3V5h4l1-2Zm-2 6h12l-1 12H7L6 9Zm4 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z"/></svg></button></div></div><small>{staff.employment_type} · {staff.location_name}</small></div></div></td>{dateKeys.map((d,i)=><td key={d}><button className={`turn-code turn-${weekly[i]||"empty"}`} onClick={()=>setShopperModal({staff,date:d})}>{weekly[i]||"＋"}</button></td>)}<td className="hours">{weeklyTypes.filter(t=>t?.counts_opening).length}</td><td className="hours">{weeklyTypes.filter(t=>t?.counts_closing).length}</td></tr>})}</tbody></table></div></>
+            <div className={`table-wrap shopper-scalable${visible.length>20?" shopper-table-compact":""}`} style={{"--shopper-scale":shopperZoom/100} as CSSProperties}><table><thead><tr><th>{shopperCategory==="purchase"?"Asesor de compra":"Repartidor"}</th>{days.map(d=><th key={d}>{d}</th>)}<th>Aperturas</th><th>Cierres</th>{isAdmin&&<th>Horas</th>}</tr></thead><tbody>{visible.map(staff=>{const weekly=dateKeys.map(d=>shopperTurns.find(t=>t.staff_id===staff.id&&t.work_date===d)?.turn_code||"");const weeklyTypes=weekly.map(code=>shopperShiftFor(code,staff.location_id));const weeklyHours=weeklyTypes.reduce((total,type)=>total+shopperShiftHours(type),0);return <tr key={staff.id}><td><div className="person"><span className="avatar">{staff.name.split(" ").map(x=>x[0]).join("").slice(0,2)}</span><div className="person-info"><div className="shopper-name-line"><strong className="shopper-name-text">{staff.name}</strong><span className="shopper-inline-id">ID {staff.shopper_external_id||"—"}</span><div className="shopper-row-actions"><button className="shopper-action edit" onClick={()=>setEditShopper(staff)} title={`Editar a ${staff.name}`} aria-label={`Editar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l11-11-4-4L4 16v4Zm12.2-16.2 4 4 1.1-1.1a1.4 1.4 0 0 0 0-2l-2-2a1.4 1.4 0 0 0-2 0l-1.1 1.1Z"/></svg></button><button className="shopper-action delete" onClick={()=>setDeleteShopper(staff)} title={`Eliminar a ${staff.name}`} aria-label={`Eliminar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8l1 2h4v2H3V5h4l1-2Zm-2 6h12l-1 12H7L6 9Zm4 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z"/></svg></button></div></div><small>{staff.employment_type} · {staff.location_name}</small></div></div></td>{dateKeys.map((d,i)=><td key={d}><button className={`turn-code turn-${weekly[i]||"empty"}`} onClick={()=>setShopperModal({staff,date:d})}>{weekly[i]||"＋"}</button></td>)}<td className="hours">{weeklyTypes.filter(t=>t?.counts_opening).length}</td><td className="hours">{weeklyTypes.filter(t=>t?.counts_closing).length}</td>{isAdmin&&<td className="hours shopper-hours">{displayHours(weeklyHours)} h</td>}</tr>})}</tbody></table></div></>
           })()}</>:<div className="shopper-directory">
             <div className="directory-heading"><div><h2>Repositorio de shoppers</h2><p>Busca por ID o nombre y administra el local asignado.</p></div><span>{shopperDirectory.length} registros</span></div>
             <label className="shopper-id-search"><span>⌕</span><input value={shopperDirectoryQuery} onChange={event=>setShopperDirectoryQuery(event.target.value)} placeholder="Buscar por ID de shopper o nombre…" /></label>
