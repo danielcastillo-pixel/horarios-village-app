@@ -15,7 +15,7 @@ function databaseError(error:{message?:string}|null|undefined,fallback:string){
 }
 function invalidDate(value:unknown){
   const date=String(value||"");
-  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)||date<SCHEDULE_MIN_DATE||date>SCHEDULE_MAX_DATE)return true;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||date<SCHEDULE_MIN_DATE||date>SCHEDULE_MAX_DATE)return true;
   const parsed=new Date(`${date}T12:00:00`);
   return Number.isNaN(parsed.getTime())||parsed.toISOString().slice(0,10)!==date;
 }
@@ -72,7 +72,7 @@ export async function POST(request:NextRequest){
     if(!/^[A-Z0-9_-]{1,6}$/.test(code))return NextResponse.json({error:"El código debe tener entre 1 y 6 letras o números"},{status:400});
     if(!label)return NextResponse.json({error:"Escribe el nombre del turno"},{status:400});
     if(!category)return NextResponse.json({error:"La categoría del turno no es válida"},{status:400});
-    if(!free&&(!/^\\d{2}:\\d{2}$/.test(String(body.start||""))||!/^\\d{2}:\\d{2}$/.test(String(body.end||""))))return NextResponse.json({error:"Selecciona una hora de inicio y una hora de fin válidas"},{status:400});
+    if(!free&&(!/^\d{2}:\d{2}$/.test(String(body.start||""))||!/^\d{2}:\d{2}$/.test(String(body.end||""))))return NextResponse.json({error:"Selecciona una hora de inicio y una hora de fin válidas"},{status:400});
     const {error}=await db.from("shopper_shift_types").insert({
       code,label,start_time:free?null:body.start,end_time:free?null:body.end,
       category,location_id:body.locationId||null,
