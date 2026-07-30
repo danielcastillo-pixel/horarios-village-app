@@ -679,11 +679,16 @@ export default function Home() {
     if(!selected){setNotice("Selecciona un local antes de generar la imagen");return;}
     const visible=shopperStaff.filter(s=>s.location_id===selected.id);
     if(!visible.length){setNotice("No existen personas en el local seleccionado");return;}
+    const columns=visible.length>20?2:1;
+    const rowsPerColumn=Math.ceil(visible.length/columns);
+    const groups=Array.from({length:columns},(_,index)=>visible.slice(index*rowsPerColumn,(index+1)*rowsPerColumn));
+    const tableFor=(staffRows:ShopperRow[])=>`<table><thead><tr><th>Shopper / ID</th>${days.map(day=>`<th>${day}</th>`).join("")}</tr></thead><tbody>${staffRows.map(staff=>`<tr><td><b>${excelEscape(staff.name)}</b><span>ID ${excelEscape(staff.shopper_external_id||"—")}</span></td>${dateKeys.map(date=>{const code=shopperTurns.find(turn=>turn.staff_id===staff.id&&turn.work_date===date)?.turn_code||"";const type=shopperShiftFor(code,staff.location_id);const tone=!type?"empty":type.is_free?(type.code==="V"?"vacation":"free"):type.counts_opening&&type.counts_closing?"closing":type.counts_opening?"opening":type.counts_closing?"closing":"middle";return `<td class="export-turn ${tone}"><b>${excelEscape(code||"—")}</b></td>`}).join("")}</tr>`).join("")}</tbody></table>`;
     const node=document.createElement("section");
-    node.className=`shopper-export-sheet${visible.length>20?" compact":""}`;
-    node.innerHTML=`<div class="shopper-export-head"><h2>${shopperCategory==="purchase"?"Asesores de compra":"Repartidores"}</h2><p>${selected.name} · ${weekLabel}</p></div><table><thead><tr><th>Nombre / ID</th>${days.map(day=>`<th>${day}</th>`).join("")}</tr></thead><tbody>${visible.map(staff=>`<tr><td><b>${excelEscape(staff.name)}</b><span>ID: ${excelEscape(staff.shopper_external_id||"Sin ID")}</span></td>${dateKeys.map(date=>{const code=shopperTurns.find(t=>t.staff_id===staff.id&&t.work_date===date)?.turn_code||"";const type=shopperShiftFor(code,staff.location_id);return `<td><b>${excelEscape(code||"—")}</b><span>${excelEscape(shopperShiftLabel(type))}</span></td>`}).join("")}</tr>`).join("")}</tbody></table>`;
+    node.className=`shopper-export-sheet whatsapp-poster${columns===2?" two-columns":""}`;
+    node.innerHTML=`<div class="shopper-export-head"><div><h2>${shopperCategory==="purchase"?"Asesores de compra":"Repartidores"}</h2><p>${selected.name} · ${weekLabel} · ${visible.length} personas</p></div><div class="shopper-export-legend"><span class="opening">A/A2/I/N Apertura</span><span class="middle">B Intermedio</span><span class="closing">T Apertura y cierre</span><span class="free">L Libre</span><span class="vacation">V Vacaciones</span></div></div><div class="shopper-export-grid">${groups.map(tableFor).join("")}</div>`;
     document.body.appendChild(node);
     try{
+      await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));
       const dataUrl=await toPng(node,{cacheBust:true,pixelRatio:2,backgroundColor:"#ffffff",width:node.scrollWidth,height:node.scrollHeight});
       const blob=await fetch(dataUrl).then(response=>response.blob());
       const filename=`Horario_${shopperCategory==="purchase"?"Compra":"Repartidores"}_${selected.name.replace(/[^a-z0-9]+/gi,"_")}_${weekStart}.png`;
