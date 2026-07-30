@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type {CSSProperties} from "react";
 import { supabase } from "@/lib/supabase";
 import { toPng } from "html-to-image";
 import * as XLSX from "xlsx";
@@ -135,7 +134,7 @@ export default function Home() {
   const scheduleRef=useRef<HTMLElement|null>(null);
   const [shopperCategory,setShopperCategory]=useState<"purchase"|"delivery">("purchase");
   const [shopperView,setShopperView]=useState<"schedule"|"directory">("schedule");
-  const [shopperZoom,setShopperZoom]=useState(100);
+  const [shopperImageChoice,setShopperImageChoice]=useState(false);
   const [shopperStaff,setShopperStaff]=useState<ShopperRow[]>([]);
   const [shopperDirectory,setShopperDirectory]=useState<ShopperRow[]>([]);
   const [shopperDirectoryQuery,setShopperDirectoryQuery]=useState("");
@@ -215,7 +214,7 @@ export default function Home() {
     try{
       const saved=JSON.parse(window.localStorage.getItem(UI_STATE_KEY)||"{}") as {
         active?:string;location?:string;weekStart?:string;shopperCategory?:"purchase"|"delivery";
-        shopperView?:"schedule"|"directory";shopperZoom?:number;reportType?:"supervisor"|"shopper";
+        shopperView?:"schedule"|"directory";reportType?:"supervisor"|"shopper";
         reportLocation?:string;reportStart?:string;reportEnd?:string;
       };
       if(saved.active)setActive(saved.active);
@@ -223,7 +222,6 @@ export default function Home() {
       if(saved.weekStart)setWeekStart(saved.weekStart);
       if(saved.shopperCategory)setShopperCategory(saved.shopperCategory);
       if(saved.shopperView)setShopperView(saved.shopperView);
-      if(saved.shopperZoom&&saved.shopperZoom>=70&&saved.shopperZoom<=130)setShopperZoom(saved.shopperZoom);
       if(saved.reportType)setReportType(saved.reportType);
       if(saved.reportLocation)setReportLocation(saved.reportLocation);
       if(saved.reportStart)setReportStart(saved.reportStart);
@@ -259,9 +257,9 @@ export default function Home() {
   useEffect(()=>{
     if(!uiStateReady)return;
     try{window.localStorage.setItem(UI_STATE_KEY,JSON.stringify({
-      active,location,weekStart,shopperCategory,shopperView,shopperZoom,reportType,reportLocation,reportStart,reportEnd
+      active,location,weekStart,shopperCategory,shopperView,reportType,reportLocation,reportStart,reportEnd
     }));}catch{}
-  },[uiStateReady,active,location,weekStart,shopperCategory,shopperView,shopperZoom,reportType,reportLocation,reportStart,reportEnd]);
+  },[uiStateReady,active,location,weekStart,shopperCategory,shopperView,reportType,reportLocation,reportStart,reportEnd]);
   useEffect(() => {
     setSidebarCollapsed(window.localStorage.getItem("regional-sidebar-collapsed") === "true");
   }, []);
@@ -674,36 +672,42 @@ export default function Home() {
     changeWeek(1);setNotice(`✓ ${result.copied} turnos copiados`);await loadShoppers();
   }
 
-  async function downloadShopperImage(){
+  async function downloadShopperImage(parts:1|2){
     const selected=data?.locations.find(l=>l.name===location);
     if(!selected){setNotice("Selecciona un local antes de generar la imagen");return;}
     const visible=shopperStaff.filter(s=>s.location_id===selected.id);
     if(!visible.length){setNotice("No existen personas en el local seleccionado");return;}
-    const columns=visible.length>20?2:1;
-    const rowsPerColumn=Math.ceil(visible.length/columns);
-    const groups=Array.from({length:columns},(_,index)=>visible.slice(index*rowsPerColumn,(index+1)*rowsPerColumn));
-    const tableFor=(staffRows:ShopperRow[])=>`<table><thead><tr><th>Shopper / ID</th>${days.map(day=>`<th>${day}</th>`).join("")}</tr></thead><tbody>${staffRows.map(staff=>`<tr><td><b>${excelEscape(staff.name)}</b><span>ID ${excelEscape(staff.shopper_external_id||"—")}</span></td>${dateKeys.map(date=>{const code=shopperTurns.find(turn=>turn.staff_id===staff.id&&turn.work_date===date)?.turn_code||"";const type=shopperShiftFor(code,staff.location_id);const tone=!type?"empty":type.is_free?(type.code==="V"?"vacation":"free"):type.counts_opening&&type.counts_closing?"closing":type.counts_opening?"opening":type.counts_closing?"closing":"middle";return `<td class="export-turn ${tone}"><b>${excelEscape(code||"—")}</b></td>`}).join("")}</tr>`).join("")}</tbody></table>`;
-    const node=document.createElement("section");
-    node.className=`shopper-export-sheet whatsapp-poster${columns===2?" two-columns":""}`;
-    node.innerHTML=`<div class="shopper-export-head"><div><h2>${shopperCategory==="purchase"?"Asesores de compra":"Repartidores"}</h2><p>${selected.name} · ${weekLabel} · ${visible.length} personas</p></div><div class="shopper-export-legend"><span class="opening">A/A2/I/N Apertura</span><span class="middle">B Intermedio</span><span class="closing">T Apertura y cierre</span><span class="free">L Libre</span><span class="vacation">V Vacaciones</span></div></div><div class="shopper-export-grid">${groups.map(tableFor).join("")}</div>`;
-    document.body.appendChild(node);
+    const size=Math.ceil(visible.length/parts);
+    const groups=Array.from({length:parts},(_,index)=>visible.slice(index*size,(index+1)*size)).filter(group=>group.length);
+    const tableFor=(staffRows:ShopperRow[])=>`<table><thead><tr><th>Shopper · ID</th>${days.map(day=>`<th>${day}</th>`).join("")}</tr></thead><tbody>${staffRows.map(staff=>`<tr><td><b>${excelEscape(staff.name)} · ID ${excelEscape(staff.shopper_external_id||"—")}</b></td>${dateKeys.map(date=>{const code=shopperTurns.find(turn=>turn.staff_id===staff.id&&turn.work_date===date)?.turn_code||"";const type=shopperShiftFor(code,staff.location_id);const tone=!type?"empty":type.is_free?(type.code==="V"?"vacation":"free"):type.counts_opening&&type.counts_closing?"closing":type.counts_opening?"opening":type.counts_closing?"closing":"middle";return `<td class="export-turn ${tone}"><b>${excelEscape(code||"—")}</b></td>`}).join("")}</tr>`).join("")}</tbody></table>`;
+    const files:File[]=[];
     try{
-      await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));
-      const dataUrl=await toPng(node,{cacheBust:true,pixelRatio:2,backgroundColor:"#ffffff",width:node.scrollWidth,height:node.scrollHeight});
-      const blob=await fetch(dataUrl).then(response=>response.blob());
-      const filename=`Horario_${shopperCategory==="purchase"?"Compra":"Repartidores"}_${selected.name.replace(/[^a-z0-9]+/gi,"_")}_${weekStart}.png`;
-      const file=new File([blob],filename,{type:"image/png"});
-      if(navigator.share&&navigator.canShare?.({files:[file]})){
-        try{await navigator.share({files:[file],title:"Horario de shoppers"});}
+      for(let index=0;index<groups.length;index++){
+        const node=document.createElement("section");
+        node.className="shopper-export-sheet whatsapp-poster single-horizontal";
+        node.innerHTML=`<div class="shopper-export-head"><div><h2>${shopperCategory==="purchase"?"Asesores de compra":"Repartidores"}</h2><p>${selected.name} · ${weekLabel} · ${visible.length} personas${parts===2?` · Parte ${index+1} de 2`:""}</p></div><div class="shopper-export-legend"><span class="opening">A/A2/I/N Apertura</span><span class="middle">B Intermedio</span><span class="closing">T Apertura y cierre</span><span class="free">L Libre</span><span class="vacation">V Vacaciones</span></div></div><div class="shopper-export-grid">${tableFor(groups[index])}</div>`;
+        document.body.appendChild(node);
+        try{
+          await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));
+          const dataUrl=await toPng(node,{cacheBust:true,pixelRatio:2,backgroundColor:"#ffffff",width:node.scrollWidth,height:node.scrollHeight});
+          const blob=await fetch(dataUrl).then(response=>response.blob());
+          const suffix=parts===2?`_Parte_${index+1}`:"";
+          const filename=`Horario_${shopperCategory==="purchase"?"Compra":"Repartidores"}_${selected.name.replace(/[^a-z0-9]+/gi,"_")}_${weekStart}${suffix}.png`;
+          files.push(new File([blob],filename,{type:"image/png"}));
+        }finally{node.remove();}
+      }
+      if(navigator.share&&navigator.canShare?.({files})){
+        try{await navigator.share({files,title:"Horario de shoppers"});}
         catch(error){
           if(error instanceof DOMException&&error.name==="AbortError")throw error;
-          const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download=filename;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+          files.forEach(file=>{const url=URL.createObjectURL(file);const link=document.createElement("a");link.href=url;link.download=file.name;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);});
         }
-      }else{const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download=filename;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-      setNotice("✓ Imagen del horario generada correctamente");
+      }else{files.forEach(file=>{const url=URL.createObjectURL(file);const link=document.createElement("a");link.href=url;link.download=file.name;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);});}
+      setShopperImageChoice(false);
+      setNotice(parts===1?"✓ Imagen horizontal generada correctamente":"✓ Dos imágenes del horario generadas correctamente");
     }catch(error){
       if(!(error instanceof DOMException&&error.name==="AbortError"))setNotice("Error: no se pudo generar la imagen");
-    }finally{node.remove();}
+    }
   }
 
   async function downloadShopperReport(){
@@ -916,9 +920,8 @@ export default function Home() {
         {active==="Shoppers"&&<section className="schedule-card shopper-schedule" ref={shopperScheduleRef}>
           <div className="shopper-view-tabs"><button className={shopperView==="schedule"?"active":""} onClick={()=>setShopperView("schedule")}><i>▦</i><span><strong>Horarios</strong><small>Programación semanal</small></span></button><button className={shopperView==="directory"?"active":""} onClick={()=>setShopperView("directory")}><i>⌕</i><span><strong>Repositorio de shoppers</strong><small>Buscar IDs y cambiar locales</small></span></button></div>
           {shopperView==="schedule"?<>
-          <div className="schedule-title"><div><h2>Horario de shoppers</h2><p>Programación por turnos del personal de tus locales asignados.</p></div><div className="schedule-actions shopper-actions"><button className="schedule-action-button" onClick={()=>setAddShopper(true)}>＋ Agregar fila</button><button className="schedule-action-button" onClick={()=>setAddShopperShift(true)}>＋ Crear turno</button><button className="schedule-action-button" onClick={()=>void copyShopperWeek()}>▣ Copiar semana</button><button className="schedule-action-button image-action" onClick={()=>void downloadShopperImage()}>▧ Descargar imagen</button></div></div>
+          <div className="schedule-title"><div><h2>Horario de shoppers</h2><p>Programación por turnos del personal de tus locales asignados.</p></div><div className="schedule-actions shopper-actions"><button className="schedule-action-button" onClick={()=>setAddShopper(true)}>＋ Agregar fila</button><button className="schedule-action-button" onClick={()=>setAddShopperShift(true)}>＋ Crear turno</button><button className="schedule-action-button" onClick={()=>void copyShopperWeek()}>▣ Copiar semana</button><button className="schedule-action-button image-action" onClick={()=>setShopperImageChoice(true)}>▧ Descargar imagen</button></div></div>
           <div className="shopper-submenu"><button className={shopperCategory==="purchase"?"active":""} onClick={()=>setShopperCategory("purchase")}>Asesores de compra</button><button className={shopperCategory==="delivery"?"active":""} onClick={()=>setShopperCategory("delivery")}>Repartidores</button></div>
-          <div className="shopper-zoom-control" aria-label="Tamaño del horario"><span>🔍 Tamaño</span><button onClick={()=>setShopperZoom(value=>Math.max(70,value-10))} disabled={shopperZoom<=70} aria-label="Reducir horario">−</button><strong>{shopperZoom}%</strong><button onClick={()=>setShopperZoom(value=>Math.min(130,value+10))} disabled={shopperZoom>=130} aria-label="Ampliar horario">＋</button></div>
           <div className="toolbar"><div className="week"><button onClick={()=>changeWeek(-1)}>‹</button><strong>{weekLabel}</strong><button onClick={()=>changeWeek(1)}>›</button></div><select value={location} onChange={e=>setLocation(e.target.value)}>{isAdmin&&<option>Todos los locales</option>}{data?.locations.map(l=><option key={l.id}>{l.name}</option>)}</select></div>
           {(()=>{
             const visible=shopperStaff.filter(s=>location==="Todos los locales"||s.location_name===location);
@@ -929,7 +932,7 @@ export default function Home() {
             });
             return <><div className="turn-kpis"><article><strong>{visible.length}</strong><span>Personal</span></article><article><strong>{types.filter(t=>t.counts_opening).length}</strong><span>Aperturas</span></article><article><strong>{types.filter(t=>!t.is_free&&!t.counts_opening&&!t.counts_closing).length}</strong><span>Intermedios</span></article><article><strong>{types.filter(t=>t.counts_closing).length}</strong><span>Cierres</span></article><article><strong>{types.filter(t=>t.is_free).length}</strong><span>Libres</span></article></div>
             <div className="daily-coverage"><div className="daily-coverage-head"><div><strong>Cobertura diaria</strong><span>Personal asignado por tipo de turno cada día</span></div><small>{shopperCategory==="purchase"?"Asesores de compra":"Repartidores"}</small></div><div className="daily-coverage-scroll">{daily.map(day=><article className="daily-card" key={day.date}><strong>{day.label}</strong><div><span>Apertura</span><b className="opening">{day.opening}</b></div><div><span>Intermedio</span><b className="intermediate">{day.intermediate}</b></div><div><span>Cierre</span><b className="closing">{day.closing}</b></div><div><span>Libre / Vac.</span><b className="free">{day.free}</b></div></article>)}</div></div>
-            <div className={`table-wrap shopper-scalable${visible.length>20?" shopper-table-compact":""}`} style={{"--shopper-scale":shopperZoom/100} as CSSProperties}><table><thead><tr><th>{shopperCategory==="purchase"?"Asesor de compra":"Repartidor"}</th>{days.map(d=><th key={d}>{d}</th>)}<th>Aperturas</th><th>Cierres</th>{isAdmin&&<th>Horas</th>}</tr></thead><tbody>{visible.map(staff=>{const weekly=dateKeys.map(d=>shopperTurns.find(t=>t.staff_id===staff.id&&t.work_date===d)?.turn_code||"");const weeklyTypes=weekly.map(code=>shopperShiftFor(code,staff.location_id));const weeklyHours=weeklyTypes.reduce((total,type)=>total+shopperShiftHours(type),0);return <tr key={staff.id}><td><div className="person"><span className="avatar">{staff.name.split(" ").map(x=>x[0]).join("").slice(0,2)}</span><div className="person-info"><div className="shopper-name-line"><strong className="shopper-name-text">{staff.name}</strong><span className="shopper-inline-id">ID {staff.shopper_external_id||"—"}</span><div className="shopper-row-actions"><button className="shopper-action edit" onClick={()=>setEditShopper(staff)} title={`Editar a ${staff.name}`} aria-label={`Editar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l11-11-4-4L4 16v4Zm12.2-16.2 4 4 1.1-1.1a1.4 1.4 0 0 0 0-2l-2-2a1.4 1.4 0 0 0-2 0l-1.1 1.1Z"/></svg></button><button className="shopper-action delete" onClick={()=>setDeleteShopper(staff)} title={`Eliminar a ${staff.name}`} aria-label={`Eliminar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8l1 2h4v2H3V5h4l1-2Zm-2 6h12l-1 12H7L6 9Zm4 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z"/></svg></button></div></div><small>{staff.employment_type} · {staff.location_name}</small></div></div></td>{dateKeys.map((d,i)=><td key={d}><button className={`turn-code turn-${weekly[i]||"empty"}`} onClick={()=>setShopperModal({staff,date:d})}>{weekly[i]||"＋"}</button></td>)}<td className="hours">{weeklyTypes.filter(t=>t?.counts_opening).length}</td><td className="hours">{weeklyTypes.filter(t=>t?.counts_closing).length}</td>{isAdmin&&<td className="hours shopper-hours">{displayHours(weeklyHours)} h</td>}</tr>})}</tbody></table></div></>
+            <div className={`table-wrap shopper-scalable${visible.length>20?" shopper-table-compact":""}`}><table><thead><tr><th>{shopperCategory==="purchase"?"Asesor de compra":"Repartidor"}</th>{days.map(d=><th key={d}>{d}</th>)}<th>Aperturas</th><th>Cierres</th>{isAdmin&&<th>Horas</th>}</tr></thead><tbody>{visible.map(staff=>{const weekly=dateKeys.map(d=>shopperTurns.find(t=>t.staff_id===staff.id&&t.work_date===d)?.turn_code||"");const weeklyTypes=weekly.map(code=>shopperShiftFor(code,staff.location_id));const weeklyHours=weeklyTypes.reduce((total,type)=>total+shopperShiftHours(type),0);return <tr key={staff.id}><td><div className="person"><span className="avatar">{staff.name.split(" ").map(x=>x[0]).join("").slice(0,2)}</span><div className="person-info"><div className="shopper-name-line"><strong className="shopper-name-text">{staff.name}</strong><div className="shopper-row-actions"><button className="shopper-action edit" onClick={()=>setEditShopper(staff)} title={`Editar a ${staff.name}`} aria-label={`Editar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l11-11-4-4L4 16v4Zm12.2-16.2 4 4 1.1-1.1a1.4 1.4 0 0 0 0-2l-2-2a1.4 1.4 0 0 0-2 0l-1.1 1.1Z"/></svg></button><button className="shopper-action delete" onClick={()=>setDeleteShopper(staff)} title={`Eliminar a ${staff.name}`} aria-label={`Eliminar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8l1 2h4v2H3V5h4l1-2Zm-2 6h12l-1 12H7L6 9Zm4 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z"/></svg></button></div></div><small>{staff.employment_type} · {staff.location_name} <span className="shopper-inline-id">ID {staff.shopper_external_id||"—"}</span></small></div></div></td>{dateKeys.map((d,i)=><td key={d}><button className={`turn-code turn-${weekly[i]||"empty"}`} onClick={()=>setShopperModal({staff,date:d})}>{weekly[i]||"＋"}</button></td>)}<td className="hours">{weeklyTypes.filter(t=>t?.counts_opening).length}</td><td className="hours">{weeklyTypes.filter(t=>t?.counts_closing).length}</td>{isAdmin&&<td className="hours shopper-hours">{displayHours(weeklyHours)} h</td>}</tr>})}</tbody></table></div></>
           })()}</>:<div className="shopper-directory">
             <div className="directory-heading"><div><h2>Repositorio de shoppers</h2><p>Busca por ID o nombre y administra el local asignado.</p></div><span>{shopperDirectory.length} registros</span></div>
             <label className="shopper-id-search"><span>⌕</span><input value={shopperDirectoryQuery} onChange={event=>setShopperDirectoryQuery(event.target.value)} placeholder="Buscar por ID de shopper o nombre…" /></label>
@@ -990,8 +993,9 @@ export default function Home() {
       </section>
 
       {notice && <button className="toast" onClick={() => setNotice("")}>{notice} ×</button>}
+      {shopperImageChoice&&<div className="modal-backdrop" onMouseDown={()=>setShopperImageChoice(false)}><div className="modal image-choice-modal" role="dialog" aria-modal="true" aria-labelledby="image-choice-title" onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" onClick={()=>setShopperImageChoice(false)}>×</button><span className="modal-kicker">DESCARGAR HORARIO</span><h2 id="image-choice-title">¿Cómo quieres generar la imagen?</h2><p>Elige una sola imagen horizontal o divide los equipos grandes en dos archivos legibles.</p><div className="image-choice-grid"><button type="button" onClick={()=>void downloadShopperImage(1)}><span>▭</span><strong>Una imagen</strong><small>Todo el equipo en una tabla horizontal compacta.</small></button><button type="button" onClick={()=>void downloadShopperImage(2)}><span>▭ ▭</span><strong>Dos imágenes</strong><small>Divide el equipo en dos partes equilibradas.</small></button></div></div></div>}
       {addShopper&&<div className="modal-backdrop" onMouseDown={()=>setAddShopper(false)}><form className="modal" onSubmit={e=>{e.preventDefault();void createShopper(new FormData(e.currentTarget));}} onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" onClick={()=>setAddShopper(false)}>×</button><span className="modal-kicker">AGREGAR FILA</span><h2>{shopperCategory==="purchase"?"Nuevo asesor de compra":"Nuevo repartidor"}</h2><p>Se agregará al local seleccionado en el horario.</p><label>Nombre completo<input name="name" required /></label><label>ID de shopper<input name="shopperId" inputMode="numeric" required placeholder="Ej. 1692" /></label><label>Tipo<select name="employmentType"><option>Interno</option><option>Externo</option><option>Full service</option>{shopperCategory==="purchase"&&<option>Shopper cobrador</option>}</select></label><button className="primary save">Guardar</button></form></div>}
-      {editShopper&&<div className="modal-backdrop" onMouseDown={()=>setEditShopper(null)}><form className="modal" onSubmit={e=>{e.preventDefault();void updateShopper(new FormData(e.currentTarget));}} onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" onClick={()=>setEditShopper(null)}>×</button><span className="modal-kicker">DATOS INTERNOS</span><h2>{editShopper.name}</h2><p>El ID no aparecerá en el horario ni en la imagen; únicamente en el reporte.</p><label>Nombre completo<input name="name" required defaultValue={editShopper.name} /></label><label>ID de shopper<input name="shopperId" inputMode="numeric" required defaultValue={editShopper.shopper_external_id||""} /></label><label>Local asignado<select name="locationId" required defaultValue={editShopper.location_id}>{data?.locations.map(item=><option key={item.id} value={item.id}>{item.name} · {item.city}</option>)}</select></label><button className="primary save">Guardar cambios</button></form></div>}
+      {editShopper&&<div className="modal-backdrop" onMouseDown={()=>setEditShopper(null)}><form className="modal" onSubmit={e=>{e.preventDefault();void updateShopper(new FormData(e.currentTarget));}} onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" onClick={()=>setEditShopper(null)}>×</button><span className="modal-kicker">DATOS INTERNOS</span><h2>{editShopper.name}</h2><p>El ID aparece de forma compacta junto a sus datos y también se conserva en el reporte.</p><label>Nombre completo<input name="name" required defaultValue={editShopper.name} /></label><label>ID de shopper<input name="shopperId" inputMode="numeric" required defaultValue={editShopper.shopper_external_id||""} /></label><label>Local asignado<select name="locationId" required defaultValue={editShopper.location_id}>{data?.locations.map(item=><option key={item.id} value={item.id}>{item.name} · {item.city}</option>)}</select></label><button className="primary save">Guardar cambios</button></form></div>}
       {deleteShopper&&<div className="modal-backdrop" onMouseDown={()=>!deletingShopper&&setDeleteShopper(null)}><div className="modal confirm-delete-modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-shopper-title" onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" disabled={deletingShopper} onClick={()=>setDeleteShopper(null)}>×</button><span className="delete-warning-icon">!</span><span className="modal-kicker">ELIMINAR DEL HORARIO</span><h2 id="delete-shopper-title">¿Eliminar a {deleteShopper.name}?</h2><p>¿Estás seguro de que quieres eliminar a este shopper del horario? Se eliminará toda su fila y los turnos asignados. Esta acción no elimina usuarios de acceso ni otros locales.</p><div className="confirm-actions"><button type="button" className="secondary" disabled={deletingShopper} onClick={()=>setDeleteShopper(null)}>Cancelar</button><button type="button" className="danger-button" disabled={deletingShopper} onClick={()=>void confirmDeleteShopper()}>{deletingShopper?"Eliminando…":"Sí, eliminar shopper"}</button></div></div></div>}
       {addShopperShift&&<div className="modal-backdrop" onMouseDown={()=>setAddShopperShift(false)}><form className="modal shift-type-editor" onSubmit={e=>{e.preventDefault();void createShopperShift(new FormData(e.currentTarget));}} onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" onClick={()=>setAddShopperShift(false)}>×</button><span className="modal-kicker">NUEVO TURNO</span><h2>Crear turno de shoppers</h2><p>El turno quedará disponible para el local seleccionado.</p><div className="time-row"><label>Código<input name="code" required maxLength={6} placeholder="A3" /></label><label>Nombre<input name="label" required placeholder="Apertura especial" /></label></div><div className="time-row"><label>Hora de inicio<input name="start" type="time" defaultValue="06:00" /></label><label>Hora de fin<input name="end" type="time" defaultValue="14:00" /></label></div><label>Disponible para<select name="category" defaultValue={shopperCategory}><option value="purchase">Asesores de compra</option><option value="delivery">Repartidores</option><option value="both">Ambos</option></select></label><fieldset className="shift-flags"><legend>Clasificación</legend><label><input type="checkbox" name="countsOpening" /> Cuenta como apertura</label><label><input type="checkbox" name="countsClosing" /> Cuenta como cierre</label><label><input type="checkbox" name="isFree" /> Es libre o vacaciones</label></fieldset><button className="primary save">Crear turno</button></form></div>}
       {shopperModal&&<div className="modal-backdrop" onMouseDown={()=>setShopperModal(null)}><div className="modal turn-modal" onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" onClick={()=>setShopperModal(null)}>×</button><span className="modal-kicker">ASIGNAR TURNO</span><h2>{shopperModal.staff.name}</h2><p>{shopperModal.date} · {shopperModal.staff.location_name}</p><div className="turn-options">{shopperShiftTypes.filter(type=>type.location_id===null||type.location_id===shopperModal.staff.location_id).map(type=><button key={`${type.id}-${type.code}`} onClick={()=>void saveShopperTurn(type.code)}><strong>{type.code}</strong><span>{type.start_time&&type.end_time?`${type.start_time.slice(0,5)}–${type.end_time.slice(0,5)} · `:""}{shopperShiftLabel(type)}</span></button>)}</div></div></div>}
