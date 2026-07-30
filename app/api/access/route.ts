@@ -15,13 +15,13 @@ function serviceClient() {
 async function authenticatedUser(request:NextRequest) {
   const token=request.headers.get("x-supabase-token")||"";
   if(!token)return null;
-  const {data:{user}}=await serviceClient().auth.getUser(token);
+  const {data:{user}}=await client(request).auth.getUser();
   return user;
 }
 async function requireAdmin(request:NextRequest) {
   const user=await authenticatedUser(request);
   if(!user)return null;
-  const {data:profile}=await serviceClient().from("profiles").select("app_role,active").eq("id",user.id).maybeSingle();
+  const {data:profile}=await client(request).from("profiles").select("app_role,active").eq("id",user.id).maybeSingle();
   return profile?.app_role==="admin"&&profile?.active ? user : null;
 }
 export async function GET(request:NextRequest) {
