@@ -175,7 +175,7 @@ export default function Home() {
   const [deleteShopper,setDeleteShopper]=useState<ShopperRow|null>(null);
   const [deletingShopper,setDeletingShopper]=useState(false);
   const [addShopperShift,setAddShopperShift]=useState(false);
-  const [reportType,setReportType]=useState<"supervisor"|"shopper">("supervisor");
+  const [reportType,setReportType]=useState<"supervisor"|"shopper">("shopper");
   const shopperScheduleRef=useRef<HTMLElement|null>(null);
   const currentLocalDate=()=>new Date().toLocaleDateString("en-CA");
   const currentLocalTime=()=>new Date().toTimeString().slice(0,5);
@@ -296,9 +296,15 @@ export default function Home() {
     if (active === "Accesos" && data?.currentUser.role === "admin") void loadAccessUsers();
   },[active,data?.currentUser.role]);
   useEffect(()=>{
+    if(active==="Reportes"){
+      setReportType("shopper");
+      setShopperCategory("purchase");
+    }
+  },[active]);
+  useEffect(()=>{
     if(!data||accessState!=="authorized")return;
     if(active==="Shoppers"&&shopperView==="directory")void loadShopperDirectory();
-    else if(active==="Panel general"||active==="Shoppers"||(active==="Reportes"&&reportType==="shopper"))void loadShoppers();
+    else if(active==="Panel general"||active==="Shoppers"||active==="Reportes")void loadShoppers();
   },[active,shopperCategory,reportType,shopperView,data,accessState]);
   useEffect(() => {
     if (!data) return;
@@ -778,8 +784,8 @@ export default function Home() {
     const selected=data?.locations.find(l=>l.name===reportLocation);
     if(!selected){setNotice("Selecciona el local del reporte");return;}
     if(!reportStart||!reportEnd||reportStart>reportEnd){setNotice("Selecciona un rango de fechas válido");return;}
-    const staff=shopperStaff.filter(s=>s.location_id===selected.id);
-    if(!staff.length){setNotice("No existen shoppers para ese local");return;}
+    const staff=shopperStaff.filter(s=>s.location_id===selected.id&&s.category==="purchase");
+    if(!staff.length){setNotice("No existen asesores de compra para ese local");return;}
     const dates:string[]=[];const cursor=new Date(`${reportStart}T12:00:00`),last=new Date(`${reportEnd}T12:00:00`);
     while(cursor<=last){dates.push(cursor.toISOString().slice(0,10));cursor.setDate(cursor.getDate()+1);}
     const rows:(string|number)[][]=staff.flatMap(person=>dates.map(date=>{
@@ -795,7 +801,7 @@ export default function Home() {
     const workbook=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook,sheet,"HORARIO");
     try{
-      await downloadWorkbook97(workbook,`Horario_Shoppers_${selected.name.replace(/[^a-z0-9]+/gi,"_")}_${reportStart}_${reportEnd}.xls`);
+      await downloadWorkbook97(workbook,`Horario_Asesores_Compra_${selected.name.replace(/[^a-z0-9]+/gi,"_")}_${reportStart}_${reportEnd}.xls`);
       setNotice("✓ Libro Excel 97-2003 generado correctamente");
     }catch(error){
       if(!(error instanceof DOMException&&error.name==="AbortError"))setNotice("Error: no se pudo generar el reporte");
@@ -1032,16 +1038,13 @@ export default function Home() {
         {active === "Cumplimiento semanal" && isAdmin && data && <WeeklyCompliance locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
 
         {active === "Reportes" && <section className="management-card">
-          <div className="report-type-tabs"><button className={reportType==="supervisor"?"active":""} onClick={()=>setReportType("supervisor")}><i>♙</i><span><strong>Supervisores</strong><small>Horas y roles por local</small></span></button><button className={reportType==="shopper"?"active":""} onClick={()=>setReportType("shopper")}><i>♟</i><span><strong>Shoppers</strong><small>Turnos de compra y entrega</small></span></button></div>
-          <div className="management-head"><div><h2>{reportType==="supervisor"?"Reporte de horarios por local":"Reporte de shoppers"}</h2><p>{reportType==="supervisor"?"Selecciona el local y cualquier rango de fechas para generar el archivo de Excel.":"Genera el libro Excel 97-2003 con ID, mes, día, horas y día libre."}</p></div><button className="primary" onClick={reportType==="supervisor"?downloadExcelReport:downloadShopperReport}>⇩ Generar Excel</button></div>
-          {reportType==="shopper"&&<div className="shopper-submenu report-shopper-type"><button className={shopperCategory==="purchase"?"active":""} onClick={()=>setShopperCategory("purchase")}>Asesores de compra</button><button className={shopperCategory==="delivery"?"active":""} onClick={()=>setShopperCategory("delivery")}>Repartidores</button></div>}
+          <div className="management-head"><div><h2>Reporte de asesores de compra</h2><p>Genera el libro Excel 97-2003 con ID, mes, día, horas y día libre.</p></div><button className="primary" onClick={downloadShopperReport}>⇩ Generar Excel</button></div>
           <div className="report-filters">
             <label>Local<select value={reportLocation} onChange={e=>setReportLocation(e.target.value)}>{isAdmin && <option value="">Seleccionar local</option>}{data?.locations.map(l=><option key={l.id} value={l.name}>{l.name} · {l.city}</option>)}</select></label>
             <label>Desde<input type="date" min={SCHEDULE_MIN_DATE} max={SCHEDULE_MAX_DATE} value={reportStart} onChange={e=>setReportStart(e.target.value)} /></label>
             <label>Hasta<input type="date" min={SCHEDULE_MIN_DATE} max={SCHEDULE_MAX_DATE} value={reportEnd} onChange={e=>setReportEnd(e.target.value)} /></label>
           </div>
-          {reportType==="supervisor"?<><div className="report-note"><strong>{reportRows.length}</strong><span>turnos encontrados</span><strong>{displayHours(reportSummary.reduce((sum,row)=>sum+row.hours,0))} h</strong><span>horas en el período</span></div>
-          <div className="report-table"><div className="report-row report-head"><span>Supervisor</span><span>Local</span><span>Horas</span><span>Días</span></div>{reportSummary.length ? reportSummary.map(s => <div className="report-row" key={s.name}><strong>{s.name}</strong><span>{reportLocation}</span><strong>{displayHours(s.hours)} h</strong><span className="ok-pill">{s.worked} trabajados · {s.free} libres</span></div>) : <div className="empty-report">Selecciona un local y el rango de fechas para revisar el resumen antes de descargarlo.</div>}</div></>:<div className="report-format-preview"><strong>Columnas del archivo</strong><span>ID_SHOPPER</span><span>MES</span><span>DIA</span><span>HORA_INICIO</span><span>HORA_FIN</span><span>DIA_LIBRE</span></div>}
+          <div className="report-format-preview"><strong>Columnas del archivo</strong><span>ID_SHOPPER</span><span>MES</span><span>DIA</span><span>HORA_INICIO</span><span>HORA_FIN</span><span>DIA_LIBRE</span></div>
         </section>}
 
         {active === "Accesos" && isAdmin && <section className="management-card">
