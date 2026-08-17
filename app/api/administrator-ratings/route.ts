@@ -133,6 +133,8 @@ export async function POST(request:NextRequest){
   if(administratorName.length<2)return NextResponse.json({error:"Ingresa el nombre del administrador evaluado."},{status:400});
   const administratorPosition=cleanText(body.administratorPosition,160);
   if(administratorPosition.length<2)return NextResponse.json({error:"Ingresa el puesto o función de la persona evaluada."},{status:400});
+  const metricsSocialized=body.metricsSocialized===true||body.metricsSocialized==="true"?true:body.metricsSocialized===false||body.metricsSocialized==="false"?false:undefined;
+  if(metricsSocialized===undefined)return NextResponse.json({error:"Indica si se socializaron las métricas con el administrador."},{status:400});
   const criteria=criteriaKeys.map(key=>criterion(body[key]));
   if(criteria.some(value=>value===undefined))return NextResponse.json({error:"Completa todos los criterios del checklist."},{status:400});
   const applicable=criteria.filter(value=>value!==null) as boolean[];
@@ -148,6 +150,7 @@ export async function POST(request:NextRequest){
     administrator_name:administratorName,
     administrator_position:administratorPosition,
     administrator_phone:cleanText(body.administratorPhone,80),
+    metrics_socialized:metricsSocialized,
     rule_compliance:criteria[0],
     uniform_compliance:criteria[1],
     ethics_compliance:criteria[2],

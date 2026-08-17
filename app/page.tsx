@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { toPng } from "html-to-image";
-import * as XLSX from "xlsx";
+import * as XLSX from "xlsx-js-style";
 import AdministratorRatings from "./AdministratorRatings";
 
 type Shift = { time: string; role: string; tone: "blue" | "green" | "orange" | "yellow" };

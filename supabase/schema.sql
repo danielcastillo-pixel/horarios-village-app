@@ -266,6 +266,7 @@ create table if not exists public.administrator_evaluations (
   administrator_name text not null check (length(trim(administrator_name)) between 2 and 160),
   administrator_position text not null default '',
   administrator_phone text not null default '',
+  metrics_socialized boolean not null default false,
   rule_compliance boolean,
   uniform_compliance boolean,
   ethics_compliance boolean,
