@@ -22,6 +22,17 @@ function workedHours(start:string|null,end:string|null,counts:boolean) {
   let minutes=eh*60+em-sh*60-sm;if(minutes<0)minutes+=1440;
   return Math.round(minutes/60*100)/100;
 }
+function isDate(value:unknown){
+  const date=String(value||"");
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return false;
+  const parsed=new Date(`${date}T12:00:00`);
+  return !Number.isNaN(parsed.getTime())&&parsed.toISOString().slice(0,10)===date;
+}
+function moveDate(value:string,days:number){
+  const date=new Date(`${value}T12:00:00`);
+  date.setDate(date.getDate()+days);
+  return date.toISOString().slice(0,10);
+}
 const regionalLocations=[
   ["MX. Village Plaza","Guayaquil"],["SX. Plaza Batán","Guayaquil"],
   ["SX. Villa Club","Guayaquil"],["MX. Ceibos","Guayaquil"],
@@ -76,25 +87,47 @@ export async function POST(request:NextRequest) {
     supervisor_id:body.supervisorId,work_date:body.workDate,start_time:body.start,end_time:body.end,role_id:body.roleId,updated_at:new Date().toISOString()
   },{onConflict:"supervisor_id,work_date"});
   else if(body.action==="addLocation") result=await db.from("locations").insert({name:String(body.name).trim(),city:String(body.city).trim()});
-  else if(body.action==="addSupervisor") result=await db.from("supervisors").insert({name:String(body.name).trim(),location_id:body.locationId});
+  else if(body.action==="addSupervisor"){
+    const activeFrom=isDate(body.weekStart)?String(body.weekStart):"2026-07-27";
+    const activeUntil=isDate(body.weekEnd)?String(body.weekEnd):moveDate(activeFrom,6);
+    result=await db.from("supervisors").insert({
+      name:String(body.name).trim(),location_id:body.locationId,active:true,active_from:activeFrom,active_until:activeUntil
+    });
+  }
   else if(body.action==="addRole") result=await db.from("roles").insert({name:String(body.name).trim(),color:body.color,counts_hours:!["Descanso","Libre","Vacaciones"].includes(String(body.name))});
-  else if(body.action==="updateSupervisor") result=await db.from("supervisors").update({name:body.name,location_id:body.locationId,active:Boolean(body.active)}).eq("id",body.id);
+  else if(body.action==="updateSupervisor"){
+    const changes:Record<string,unknown>={name:String(body.name).trim(),location_id:Number(body.locationId)};
+    if(body.active!==undefined)changes.active=Boolean(Number(body.active));
+    result=await db.from("supervisors").update(changes).eq("id",body.id);
+  }
+  else if(body.action==="removeSupervisorFromWeek"){
+    if(!isDate(body.weekStart))return NextResponse.json({error:"La semana seleccionada no es válida"},{status:400});
+    result=await db.from("supervisors").update({active:false,active_until:moveDate(String(body.weekStart),-1)}).eq("id",body.id);
+  }
   else if(body.action==="copyWeek"){
     const sourceStart=String(body.sourceStart),targetStart=String(body.targetStart);
-    const sourceEnd=new Date(`${sourceStart}T12:00:00`);sourceEnd.setDate(sourceEnd.getDate()+6);
-    const {data:localSupervisors,error:supervisorError}=await db.from("supervisors").select("id").eq("location_id",body.locationId).eq("active",true);
+    if(!isDate(sourceStart)||!isDate(targetStart))return NextResponse.json({error:"La semana seleccionada no es válida"},{status:400});
+    const sourceEnd=moveDate(sourceStart,6),targetEnd=moveDate(targetStart,6);
+    const {data:localSupervisors,error:supervisorError}=await db.from("supervisors").select("id,active_until").eq("location_id",body.locationId).lte("active_from",sourceEnd).or(`active_until.is.null,active_until.gte.${sourceStart}`);
     if(supervisorError)return NextResponse.json({error:supervisorError.message},{status:400});
     const supervisorIds=(localSupervisors||[]).map((s:any)=>s.id);
     if(!supervisorIds.length)return NextResponse.json({error:"El local no tiene filas de supervisores activas."},{status:400});
-    const {data:source,error:sourceError}=await db.from("assignments").select("supervisor_id,work_date,start_time,end_time,role_id,notes").in("supervisor_id",supervisorIds).gte("work_date",sourceStart).lte("work_date",sourceEnd.toISOString().slice(0,10));
+    const {data:source,error:sourceError}=await db.from("assignments").select("supervisor_id,work_date,start_time,end_time,role_id,notes").in("supervisor_id",supervisorIds).gte("work_date",sourceStart).lte("work_date",sourceEnd);
     if(sourceError)return NextResponse.json({error:sourceError.message},{status:400});
+    const offset=Math.round((new Date(`${targetStart}T12:00:00`).getTime()-new Date(`${sourceStart}T12:00:00`).getTime())/86400000);
     const copied=(source||[]).map((assignment:any)=>{
-      const date=new Date(`${assignment.work_date}T12:00:00`);date.setDate(date.getDate()+7);
+      const date=new Date(`${assignment.work_date}T12:00:00`);date.setDate(date.getDate()+offset);
       return {...assignment,work_date:date.toISOString().slice(0,10),updated_at:new Date().toISOString()};
     });
-    if(!copied.length)return NextResponse.json({error:"La semana actual no tiene turnos para copiar."},{status:400});
-    const {error:copyError}=await db.from("assignments").upsert(copied,{onConflict:"supervisor_id,work_date"});
-    if(copyError)return NextResponse.json({error:copyError.message},{status:400});
+    if(copied.length){
+      const {error:copyError}=await db.from("assignments").upsert(copied,{onConflict:"supervisor_id,work_date"});
+      if(copyError)return NextResponse.json({error:copyError.message},{status:400});
+    }
+    const extendIds=(localSupervisors||[]).filter((s:any)=>s.active_until&&s.active_until<=sourceEnd).map((s:any)=>s.id);
+    if(extendIds.length){
+      const {error:extendError}=await db.from("supervisors").update({active:true,active_until:targetEnd}).in("id",extendIds);
+      if(extendError)return NextResponse.json({error:extendError.message},{status:400});
+    }
     return NextResponse.json({ok:true,copied:copied.length});
   }
   else return NextResponse.json({error:"Acción desconocida"},{status:400});
