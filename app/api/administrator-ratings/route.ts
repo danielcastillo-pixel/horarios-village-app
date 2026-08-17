@@ -31,12 +31,6 @@ function userClient(request:NextRequest){
   );
 }
 
-function serviceClient(){
-  const key=process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if(!key)throw new Error("Falta configurar SUPABASE_SERVICE_ROLE_KEY.");
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,key,{auth:{persistSession:false,autoRefreshToken:false}});
-}
-
 function isDate(value:unknown){
   const date=String(value||"");
   if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return false;
@@ -84,8 +78,7 @@ export async function GET(request:NextRequest){
   const first=`${year}-01-01`,last=`${year}-12-31`;
 
   if(auth.profile.app_role==="admin"){
-    const service=serviceClient();
-    const {data,error}=await service
+    const {data,error}=await auth.db
       .from("administrator_evaluations")
       .select("*,locations(name,city),administrator_evaluation_results(compliant_count,applicable_count,score,semaphore,calculated_at)")
       .gte("week_start",first).lte("week_start",last)
@@ -138,28 +131,22 @@ export async function POST(request:NextRequest){
 
   const administratorName=cleanText(body.administratorName,160);
   if(administratorName.length<2)return NextResponse.json({error:"Ingresa el nombre del administrador evaluado."},{status:400});
+  const administratorPosition=cleanText(body.administratorPosition,160);
+  if(administratorPosition.length<2)return NextResponse.json({error:"Ingresa el puesto o función de la persona evaluada."},{status:400});
   const criteria=criteriaKeys.map(key=>criterion(body[key]));
   if(criteria.some(value=>value===undefined))return NextResponse.json({error:"Completa todos los criterios del checklist."},{status:400});
   const applicable=criteria.filter(value=>value!==null) as boolean[];
   if(!applicable.length)return NextResponse.json({error:"Al menos un criterio debe ser aplicable."},{status:400});
 
-  const service=serviceClient();
-  if(auth.profile.app_role!=="admin"){
-    const {data:grants,error:grantError}=await service.from("profile_locations").select("location_id").eq("profile_id",auth.profile.id);
-    if(grantError)return NextResponse.json({error:grantError.message},{status:400});
-    const allowed=new Set((grants||[]).map((row:any)=>Number(row.location_id)));
-    if(auth.profile.location_id)allowed.add(Number(auth.profile.location_id));
-    if(!allowed.has(locationId))return NextResponse.json({error:"No tienes permiso para evaluar este local."},{status:403});
-  }
-  const {data:location,error:locationError}=await service.from("locations").select("id").eq("id",locationId).eq("active",true).maybeSingle();
+  const {data:location,error:locationError}=await auth.db.from("locations").select("id").eq("id",locationId).eq("active",true).maybeSingle();
   if(locationError||!location)return NextResponse.json({error:"El local seleccionado no está disponible."},{status:400});
 
-  const snapshotName=cleanText(auth.profile.full_name||auth.profile.email,160);
   const now=new Date().toISOString();
   const editable={
     visit_date:visitDate,
     next_visit_date:nextVisitDate,
     administrator_name:administratorName,
+    administrator_position:administratorPosition,
     administrator_phone:cleanText(body.administratorPhone,80),
     rule_compliance:criteria[0],
     uniform_compliance:criteria[1],
@@ -170,45 +157,26 @@ export async function POST(request:NextRequest){
     observations:cleanText(body.observations,4000),
     local_feedback:cleanText(body.localFeedback,4000),
     supervisor_feedback:cleanText(body.supervisorFeedback,4000),
-    last_updated_by:auth.profile.id,
-    last_updated_by_name:snapshotName,
     updated_at:now
   };
-  const {data:existing,error:existingError}=await service
+  const {data:existing,error:existingError}=await auth.db
     .from("administrator_evaluations").select("id")
     .eq("location_id",locationId).eq("week_start",weekStart).maybeSingle();
   if(existingError)return NextResponse.json({error:existingError.message},{status:400});
 
   let evaluationId:number;
   if(existing){
-    const {data:updated,error:updateError}=await service.from("administrator_evaluations").update(editable).eq("id",existing.id).select("id").single();
+    const {data:updated,error:updateError}=await auth.db.from("administrator_evaluations").update(editable).eq("id",existing.id).select("id").single();
     if(updateError)return NextResponse.json({error:updateError.message},{status:400});
     evaluationId=Number(updated.id);
   }else{
-    const {data:inserted,error:insertError}=await service.from("administrator_evaluations").insert({
+    const {data:inserted,error:insertError}=await auth.db.from("administrator_evaluations").insert({
       location_id:locationId,week_start:weekStart,week_end:weekEnd,
-      ...editable,
-      submitted_by:auth.profile.id,
-      submitted_by_name:snapshotName,
-      submitted_by_email:auth.profile.email,
-      submitted_at:now
+      ...editable
     }).select("id").single();
     if(insertError)return NextResponse.json({error:insertError.message},{status:400});
     evaluationId=Number(inserted.id);
   }
 
-  const compliant=applicable.filter(Boolean).length;
-  const score=Math.round(compliant/applicable.length*10000)/100;
-  const semaphore=score>=90?"green":score>=75?"yellow":"red";
-  const {error:resultError}=await service.from("administrator_evaluation_results").upsert({
-    evaluation_id:evaluationId,
-    compliant_count:compliant,
-    applicable_count:applicable.length,
-    score,
-    semaphore,
-    calculated_at:now
-  });
-  if(resultError)return NextResponse.json({error:resultError.message},{status:400});
-
-  return NextResponse.json(auth.profile.app_role==="admin"?{ok:true,id:evaluationId,result:{score,semaphore,compliantCount:compliant,applicableCount:applicable.length}}:{ok:true,id:evaluationId});
+  return NextResponse.json({ok:true,id:evaluationId});
 }

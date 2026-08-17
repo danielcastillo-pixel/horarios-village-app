@@ -8,7 +8,7 @@ type CurrentUser={email:string;name:string;role:"admin"|"supervisor";locationId:
 type RatingResult={compliant_count:number;applicable_count:number;score:number;semaphore:"green"|"yellow"|"red";calculated_at:string};
 type RatingEvaluation={
   id:number;location_id:number;location_name:string;city:string;week_start:string;week_end:string;
-  visit_date:string;next_visit_date:string|null;administrator_name:string;administrator_phone:string;
+  visit_date:string;next_visit_date:string|null;administrator_name:string;administrator_position:string;administrator_phone:string;
   rule_compliance:boolean|null;uniform_compliance:boolean|null;ethics_compliance:boolean|null;
   punctuality_compliance:boolean|null;no_team_complaints:boolean|null;
   particular_observations:string;observations:string;local_feedback:string;supervisor_feedback:string;
@@ -79,7 +79,8 @@ function evaluationSheet(evaluation:RatingEvaluation,includeResult:boolean){
     ["CALIFICACIÓN AL ADMINISTRADOR"],
     ["FECHA DE VISITA",evaluation.visit_date,"PRÓXIMA VISITA",evaluation.next_visit_date||""],
     ["LOCAL",evaluation.location_name,"ADMINISTRADOR",evaluation.administrator_name],
-    ["TELÉFONO",evaluation.administrator_phone||"Sin registrar","SEMANA",`${evaluation.week_start} al ${evaluation.week_end}`],
+    ["PUESTO O FUNCIÓN",evaluation.administrator_position,"TELÉFONO",evaluation.administrator_phone||"Sin registrar"],
+    ["SEMANA",`${evaluation.week_start} al ${evaluation.week_end}`],
     [],
     ["CHECK LIST","RESPUESTA"],
     ...criteria.map(([key,label])=>[label,criterionLabel(evaluation[key])]),
@@ -150,17 +151,18 @@ export default function AdministratorRatings({locations,currentUser,apiFetch,set
     const body:Record<string,unknown>={
       locationId:editor.location.id,weekStart,
       visitDate:form.get("visitDate"),nextVisitDate:form.get("nextVisitDate"),
-      administratorName:form.get("administratorName"),administratorPhone:form.get("administratorPhone"),
+      administratorName:form.get("administratorName"),administratorPosition:form.get("administratorPosition"),administratorPhone:form.get("administratorPhone"),
       particularObservations:form.get("particularObservations"),observations:form.get("observations"),
       localFeedback:form.get("localFeedback"),supervisorFeedback:form.get("supervisorFeedback")
     };
     criteria.forEach(([key])=>{body[key]=form.get(key);});
     try{
       const response=await apiFetch("/api/administrator-ratings",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
-      const payload=await response.json().catch(()=>({error:"No se pudo guardar la evaluación"})) as {error?:string};
-      if(!response.ok){setNotice(`Error: ${payload.error||"No se pudo guardar la evaluación"}`);return;}
+      const raw=await response.text();
+      const payload=(()=>{try{return JSON.parse(raw) as {error?:string};}catch{return {} as {error?:string};}})();
+      if(!response.ok){setNotice(`Error: ${payload.error||`No se pudo guardar la evaluación (HTTP ${response.status})`}`);return;}
       setEditor(null);setNotice("✓ Evaluación enviada y guardada en el histórico");await loadEvaluations();
-    }catch{setNotice("Error: no se pudo guardar la evaluación");}
+    }catch(error){setNotice(`Error: ${error instanceof Error?error.message:"No se pudo guardar la evaluación"}`);}
     finally{setSaving(false);}
   }
 
@@ -180,10 +182,10 @@ export default function AdministratorRatings({locations,currentUser,apiFetch,set
     if(!rows.length){setNotice("Ese local todavía no tiene evaluaciones en el año seleccionado");return;}
     const summaryRows:(string|number)[][]=[
       ["RESUMEN PROGRESIVO · CALIFICACIÓN AL ADMINISTRADOR"],
-      ["Semana","Fecha de visita","Próxima visita","Local","Administrador","Calificación","Semáforo","Observaciones","Feedback local","Supervisor que califica","Feedback supervisor","Enviado el"],
-      ...rows.map(item=>[item.week_start,item.visit_date,item.next_visit_date||"",item.location_name,item.administrator_name,item.result?.score??"",item.result?semaphoreLabel(item.result.semaphore):"",item.observations,item.local_feedback,item.submitted_by_name,item.supervisor_feedback,timeLabel(item.submitted_at)])
+      ["Semana","Fecha de visita","Próxima visita","Local","Administrador","Puesto o función","Calificación","Semáforo","Observaciones","Feedback local","Supervisor que califica","Feedback supervisor","Enviado el"],
+      ...rows.map(item=>[item.week_start,item.visit_date,item.next_visit_date||"",item.location_name,item.administrator_name,item.administrator_position,item.result?.score??"",item.result?semaphoreLabel(item.result.semaphore):"",item.observations,item.local_feedback,item.submitted_by_name,item.supervisor_feedback,timeLabel(item.submitted_at)])
     ];
-    const summary=XLSX.utils.aoa_to_sheet(summaryRows);decorateSheet(summary,[14,15,15,28,28,14,13,34,34,26,34,22]);summary["!merges"]=[XLSX.utils.decode_range("A1:L1")];
+    const summary=XLSX.utils.aoa_to_sheet(summaryRows);decorateSheet(summary,[14,15,15,28,28,24,14,13,34,34,26,34,22]);summary["!merges"]=[XLSX.utils.decode_range("A1:M1")];
     const selectedMonth=weekStart.slice(0,7);
     const fortnightRows=rows.filter(item=>item.week_start.slice(0,7)===selectedMonth).slice(-2);
     const fortnight=XLSX.utils.aoa_to_sheet([
@@ -244,7 +246,7 @@ export default function AdministratorRatings({locations,currentUser,apiFetch,set
     {editor&&<div className="modal-backdrop" onMouseDown={()=>!saving&&setEditor(null)}><form className="modal rating-form" onSubmit={event=>{event.preventDefault();void saveEvaluation(new FormData(event.currentTarget));}} onMouseDown={event=>event.stopPropagation()}>
       <button type="button" className="close" disabled={saving} onClick={()=>setEditor(null)}>×</button>
       <span className="modal-kicker">SEMANA {weekStart}</span><h2>{editor.location.name}</h2><p>Completa el checklist. La calificación calculada será visible únicamente para el administrador.</p>
-      <div className="rating-form-grid"><label>Fecha de visita<input name="visitDate" type="date" min={weekStart} max={weekEnd} required defaultValue={editor.evaluation?.visit_date||(today>=weekStart&&today<=weekEnd?today:weekStart)}/></label><label>Próxima visita<input name="nextVisitDate" type="date" min={editor.evaluation?.visit_date||weekStart} defaultValue={editor.evaluation?.next_visit_date||""}/></label><label>Administrador evaluado<input name="administratorName" required defaultValue={editor.evaluation?.administrator_name||""}/></label><label>Teléfono<input name="administratorPhone" defaultValue={editor.evaluation?.administrator_phone||""}/></label></div>
+      <div className="rating-form-grid"><label>Fecha de visita<input name="visitDate" type="date" min={weekStart} max={weekEnd} required defaultValue={editor.evaluation?.visit_date||(today>=weekStart&&today<=weekEnd?today:weekStart)}/></label><label>Próxima visita<input name="nextVisitDate" type="date" min={editor.evaluation?.visit_date||weekStart} defaultValue={editor.evaluation?.next_visit_date||""}/></label><label>Persona evaluada<input name="administratorName" required defaultValue={editor.evaluation?.administrator_name||""}/></label><label>Puesto o función<input name="administratorPosition" required placeholder="Ej. Administrador, encargado o jefe de local" defaultValue={editor.evaluation?.administrator_position||""}/></label><label>Teléfono<input name="administratorPhone" defaultValue={editor.evaluation?.administrator_phone||""}/></label></div>
       <fieldset className="rating-checklist"><legend>Checklist de evaluación</legend>{criteria.map(([key,label])=><label key={key}><span>{label}</span><select name={key} required defaultValue={editor.evaluation?editor.evaluation[key]===true?"true":editor.evaluation[key]===false?"false":"na":""}><option value="" disabled>Selecciona</option><option value="true">Cumple</option><option value="false">No cumple</option><option value="na">No aplica</option></select></label>)}</fieldset>
       <label>Observaciones particulares<textarea name="particularObservations" rows={2} defaultValue={editor.evaluation?.particular_observations||""}/></label>
       <label>Observaciones<textarea name="observations" rows={2} defaultValue={editor.evaluation?.observations||""}/></label>
@@ -254,7 +256,7 @@ export default function AdministratorRatings({locations,currentUser,apiFetch,set
     </form></div>}
 
     {detail&&<div className="modal-backdrop" onMouseDown={()=>setDetail(null)}><div className="modal rating-detail" onMouseDown={event=>event.stopPropagation()}>
-      <button type="button" className="close" onClick={()=>setDetail(null)}>×</button><span className="modal-kicker">RESULTADO PRIVADO</span><h2>{detail.location_name}</h2><p>{detail.administrator_name} · Semana {detail.week_start}</p>
+      <button type="button" className="close" onClick={()=>setDetail(null)}>×</button><span className="modal-kicker">RESULTADO PRIVADO</span><h2>{detail.location_name}</h2><p>{detail.administrator_name} · {detail.administrator_position} · Semana {detail.week_start}</p>
       {detail.result&&<div className={`rating-detail-score ${detail.result.semaphore}`}><strong>{detail.result.score}%</strong><span>{semaphoreLabel(detail.result.semaphore)} · {detail.result.compliant_count} de {detail.result.applicable_count} criterios</span></div>}
       <div className="rating-detail-list">{criteria.map(([key,label])=><div key={key}><span>{label}</span><strong className={detail[key]===true?"yes":detail[key]===false?"no":"na"}>{criterionLabel(detail[key])}</strong></div>)}</div>
       <div className="rating-detail-notes"><p><strong>Observaciones particulares</strong>{detail.particular_observations||"Sin observaciones"}</p><p><strong>Observaciones</strong>{detail.observations||"Sin observaciones"}</p><p><strong>Feedback local</strong>{detail.local_feedback||"Sin feedback"}</p><p><strong>Feedback supervisor</strong>{detail.supervisor_feedback||"Sin feedback"}</p></div>
