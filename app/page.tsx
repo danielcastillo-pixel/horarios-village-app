@@ -939,7 +939,7 @@ export default function Home() {
       <section className="workspace">
         <header>
           <div><p className="eyebrow">CONTROL OPERATIVO REGIONAL</p><h1>{navigationLabel(active)}</h1><p>Planificación y control semanal de supervisión</p></div>
-          {!['Calificación administrador','Autorizaciones','Cumplimiento semanal'].includes(active)&&<div className="header-actions"><button className="secondary" onClick={() => window.print()}>⇩ Exportar</button><button className="primary" onClick={() => {setActive("Horarios");if(!people.length)setCreate("supervisor");else setNotice("Selecciona una celda para crear o modificar un turno");}}>＋ Nuevo horario</button></div>}
+          {active==="Horarios"&&<div className="header-actions"><button className="secondary" onClick={() => window.print()}>⇩ Exportar</button><button className="primary" onClick={() => {if(!people.length)setCreate("supervisor");else setNotice("Selecciona una celda para crear o modificar un turno");}}>＋ Nuevo horario</button></div>}
         </header>
 
         {active==="Panel general"&&<section className="presence-card">
