@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { toPng } from "html-to-image";
 import * as XLSX from "xlsx";
+import AdministratorRatings from "./AdministratorRatings";
 
 type Shift = { time: string; role: string; tone: "blue" | "green" | "orange" | "yellow" };
 type Person = { id: number; name: string; location: string; initials: string; shifts: (Shift | null)[] };
@@ -32,9 +33,9 @@ const locations = [
 const shift = (time: string, role: string, tone: Shift["tone"]): Shift => ({ time, role, tone });
 const adminNav = [
   ["▦", "Panel general"], ["▣", "Horarios"], ["♙", "Supervisores"],
-  ["◫", "Turnos y roles"], ["♟", "Shoppers"], ["⌂", "Locales"], ["▥", "Reportes"], ["⚿", "Accesos"]
+  ["◫", "Turnos y roles"], ["♟", "Shoppers"], ["★", "Calificación administrador"], ["⌂", "Locales"], ["▥", "Reportes"], ["⚿", "Accesos"]
 ];
-const supervisorNav = [["▣", "Horarios"],["♟", "Shoppers"],["▥", "Reportes"]];
+const supervisorNav = [["▣", "Horarios"],["♟", "Shoppers"],["★", "Calificación administrador"],["▥", "Reportes"]];
 const UI_STATE_KEY="regional-ops-ui-state";
 const dataCacheKey=(email:string)=>`regional-ops-data-${email.toLowerCase()}`;
 const SCHEDULE_MIN_DATE="2026-07-27";
@@ -458,7 +459,7 @@ export default function Home() {
       if(tableWrap)tableWrap.style.overflow="visible";
       await new Promise(resolve=>requestAnimationFrame(()=>resolve(null)));
       const dataUrl=await toPng(node,{
-        cacheBust:true,pixelRatio:3,backgroundColor:"#ffffff",
+        cacheBust:true,pixelRatio:2,backgroundColor:"#ffffff",
         width:node.scrollWidth,height:node.scrollHeight,
         filter:element=>!(element instanceof HTMLElement&&element.classList.contains("schedule-actions"))
       });
@@ -702,7 +703,7 @@ export default function Home() {
         document.body.appendChild(node);
         try{
           await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));
-          const dataUrl=await toPng(node,{cacheBust:true,pixelRatio:2,backgroundColor:"#ffffff",width:node.scrollWidth,height:node.scrollHeight});
+          const dataUrl=await toPng(node,{cacheBust:true,pixelRatio:3,backgroundColor:"#ffffff",width:node.scrollWidth,height:node.scrollHeight});
           const blob=await fetch(dataUrl).then(response=>response.blob());
           const suffix=parts===2?`_Parte_${index+1}`:"";
           const filename=`Horario_${shopperCategory==="purchase"?"Compra":"Repartidores"}_${selected.name.replace(/[^a-z0-9]+/gi,"_")}_${weekStart}${suffix}.png`;
@@ -882,7 +883,7 @@ export default function Home() {
       <section className="workspace">
         <header>
           <div><p className="eyebrow">CONTROL OPERATIVO REGIONAL</p><h1>{active}</h1><p>Planificación y control semanal de supervisión</p></div>
-          <div className="header-actions"><button className="secondary" onClick={() => window.print()}>⇩ Exportar</button><button className="primary" onClick={() => {setActive("Horarios");if(!people.length)setCreate("supervisor");else setNotice("Selecciona una celda para crear o modificar un turno");}}>＋ Nuevo horario</button></div>
+          {active!=="Calificación administrador"&&<div className="header-actions"><button className="secondary" onClick={() => window.print()}>⇩ Exportar</button><button className="primary" onClick={() => {setActive("Horarios");if(!people.length)setCreate("supervisor");else setNotice("Selecciona una celda para crear o modificar un turno");}}>＋ Nuevo horario</button></div>}
         </header>
 
         {active==="Panel general"&&<section className="presence-card">
@@ -906,12 +907,12 @@ export default function Home() {
           </div>}
         </section>}
 
-        <section className="kpis">
+        {active!=="Calificación administrador"&&<section className="kpis">
           <article><span>Supervisores activos</span><strong>{data?.supervisors.filter(s=>s.active===1).length ?? people.length}</strong><small className="ok">● Nómina disponible</small></article>
           <article><span>Horas planificadas</span><strong>{displayHours(people.reduce((n,p) => n + hoursFor(p),0))} h</strong><small>Calculadas según cada rango</small></article>
           <article><span>Cobertura semanal</span><strong>96%</strong><div className="progress"><i /></div></article>
           <article><span>{isAdmin?"Locales registrados":"Local asignado"}</span><strong>{data?.locations.length ?? 0}</strong><small className="warn">{isAdmin?"Administrables":"Acceso limitado"}</small></article>
-        </section>
+        </section>}
 
         {(active === "Panel general" || active === "Horarios") && <section className="schedule-card" ref={scheduleRef}>
           <div className="schedule-title"><div><h2>Horario semanal</h2><p>Puedes editar nombres, quitar filas y modificar los turnos de tus locales asignados. Las semanas anteriores conservan su historial.</p></div><div className="schedule-actions"><button className="schedule-action-button" onClick={() => setCreate("supervisor")}>＋ Agregar fila</button><button className="schedule-action-button" onClick={()=>void copyWeek()}>▣ Copiar semana</button><button className="schedule-action-button image-action" onClick={()=>void downloadScheduleImage()}>▧ Descargar imagen</button></div></div>
@@ -967,6 +968,8 @@ export default function Home() {
           <div className="management-head"><div><h2>Turnos y roles</h2><p>Crea las actividades utilizadas en cada horario.</p></div><button className="primary" onClick={() => setCreate("role")}>＋ Crear rol</button></div>
           <div className="role-grid">{(data?.roles ?? []).map(r => <article key={r.id}><i className={`role-dot ${r.color}`} /><strong>{r.name}</strong><span className="status">Disponible</span></article>)}</div>
         </section>}
+
+        {active === "Calificación administrador" && data && <AdministratorRatings locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
 
         {active === "Reportes" && <section className="management-card">
           <div className="report-type-tabs"><button className={reportType==="supervisor"?"active":""} onClick={()=>setReportType("supervisor")}><i>♙</i><span><strong>Supervisores</strong><small>Horas y roles por local</small></span></button><button className={reportType==="shopper"?"active":""} onClick={()=>setReportType("shopper")}><i>♟</i><span><strong>Shoppers</strong><small>Turnos de compra y entrega</small></span></button></div>
