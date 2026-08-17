@@ -942,8 +942,6 @@ export default function Home() {
           {!['Calificación administrador','Autorizaciones','Cumplimiento semanal'].includes(active)&&<div className="header-actions"><button className="secondary" onClick={() => window.print()}>⇩ Exportar</button><button className="primary" onClick={() => {setActive("Horarios");if(!people.length)setCreate("supervisor");else setNotice("Selecciona una celda para crear o modificar un turno");}}>＋ Nuevo horario</button></div>}
         </header>
 
-        {active==="Panel general"&&isAdmin&&data&&<DashboardInsights locations={data.locations} apiFetch={apiFetch} setNotice={setNotice} onNavigate={section=>setActive(section)} />}
-
         {active==="Panel general"&&<section className="presence-card">
           <div className="presence-heading"><div><span className="presence-live-dot" /><div><h2>¿Quién está de turno?</h2><p>Consulta el personal programado por local, fecha y hora.</p></div></div><span className="presence-now">Consulta operativa</span></div>
           <div className="presence-filters">
@@ -964,6 +962,8 @@ export default function Home() {
             </div>
           </div>}
         </section>}
+
+        {active==="Panel general"&&isAdmin&&data&&<DashboardInsights locations={data.locations} apiFetch={apiFetch} setNotice={setNotice} onNavigate={section=>setActive(section)} />}
 
         {!['Panel general','Calificación administrador','Autorizaciones','Cumplimiento semanal'].includes(active)&&<section className="kpis">
           <article><span>Supervisores activos</span><strong>{data?.supervisors.filter(s=>s.active===1).length ?? people.length}</strong><small className="ok">● Nómina disponible</small></article>
