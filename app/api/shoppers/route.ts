@@ -2,9 +2,13 @@ import {NextRequest,NextResponse} from "next/server";
 import {createClient} from "@supabase/supabase-js";
 const SCHEDULE_MIN_DATE="2026-07-27";
 const SCHEDULE_MAX_DATE=`${Math.max(new Date().getFullYear()+1,2027)}-12-31`;
+function sessionToken(request:NextRequest){return (request.headers.get("x-supabase-token")||"").trim();}
 function client(request:NextRequest){
-  const token=request.headers.get("x-supabase-token")||"";
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{global:{headers:{Authorization:`Bearer ${token}`}},auth:{persistSession:false}});
+  const token=sessionToken(request);
+  const auth={persistSession:false,autoRefreshToken:false};
+  return token
+    ?createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{global:{headers:{Authorization:`Bearer ${token}`}},auth})
+    :createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth});
 }
 function databaseError(error:{message?:string}|null|undefined,fallback:string){
   const message=error?.message||"";
@@ -20,6 +24,7 @@ function invalidDate(value:unknown){
   return Number.isNaN(parsed.getTime())||parsed.toISOString().slice(0,10)!==date;
 }
 export async function GET(request:NextRequest){
+  if(!sessionToken(request))return NextResponse.json({error:"Sesión no válida"},{status:401});
   const db=client(request),category=request.nextUrl.searchParams.get("category")==="delivery"?"delivery":"purchase";
   if(request.nextUrl.searchParams.get("directory")==="1"){
     const {data,error}=await db.from("shopper_staff").select("*,locations(name)").order("name");
@@ -50,6 +55,7 @@ export async function GET(request:NextRequest){
   });
 }
 export async function POST(request:NextRequest){
+  if(!sessionToken(request))return NextResponse.json({error:"Sesión no válida"},{status:401});
   const db=client(request),body=await request.json();
   if(body.action==="addStaff"){
     const shopperId=String(body.shopperId||"").trim();
