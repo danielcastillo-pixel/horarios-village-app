@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "regional-ops-app",
+  "name": "control-operativo",
   "main": ".open-next/worker.js",
   "compatibility_date": "2026-07-28",
   "compatibility_flags": [
