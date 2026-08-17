@@ -5,6 +5,8 @@ import { supabase } from "@/lib/supabase";
 import { toPng } from "html-to-image";
 import * as XLSX from "xlsx-js-style";
 import AdministratorRatings from "./AdministratorRatings";
+import Authorizations from "./Authorizations";
+import WeeklyCompliance from "./WeeklyCompliance";
 
 type Shift = { time: string; role: string; tone: "blue" | "green" | "orange" | "yellow" };
 type Person = { id: number; name: string; location: string; initials: string; shifts: (Shift | null)[] };
@@ -33,9 +35,9 @@ const locations = [
 const shift = (time: string, role: string, tone: Shift["tone"]): Shift => ({ time, role, tone });
 const adminNav = [
   ["▦", "Panel general"], ["▣", "Horarios"], ["♙", "Supervisores"],
-  ["◫", "Turnos y roles"], ["♟", "Shoppers"], ["★", "Calificación administrador"], ["⌂", "Locales"], ["▥", "Reportes"], ["⚿", "Accesos"]
+  ["◫", "Turnos y roles"], ["♟", "Shoppers"], ["★", "Calificación administrador"], ["✓", "Cumplimiento semanal"], ["$", "Autorizaciones"], ["⌂", "Locales"], ["▥", "Reportes"], ["⚿", "Accesos"]
 ];
-const supervisorNav = [["▣", "Horarios"],["♟", "Shoppers"],["★", "Calificación administrador"],["▥", "Reportes"]];
+const supervisorNav = [["▣", "Horarios"],["◫", "Turnos y roles"],["♟", "Shoppers"],["★", "Calificación administrador"],["$", "Autorizaciones"],["▥", "Reportes"]];
 const navigationLabel = (label:string) => label === "Horarios" ? "Horario Supervisor" : label === "Shoppers" ? "Horario Shoppers" : label;
 const navigationIconPaths:Record<string,string[]> = {
   "Panel general":["M3 11.5 12 4l9 7.5","M5.5 10.5V20h13v-9.5","M9.5 20v-6h5v6"],
@@ -44,6 +46,8 @@ const navigationIconPaths:Record<string,string[]> = {
   "Turnos y roles":["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z","M12 7v5l3 2"],
   "Shoppers":["M4 5h16v15H4z","M8 3v4M16 3v4M4 9h16","M8 13h8M8 17h5"],
   "Calificación administrador":["m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9L6.6 20l1-6.1-4.4-4.3 6.1-.9L12 3Z"],
+  "Cumplimiento semanal":["M4 5h16v15H4z","M8 3v4M16 3v4M4 9h16","m8 14 2 2 5-5"],
+  "Autorizaciones":["M6 3h12v18H6z","M9 7h6M9 11h6M9 15h3","m14 17 1.5 1.5L19 15"],
   "Locales":["M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z","M12 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"],
   "Reportes":["M4 20V10h4v10H4ZM10 20V4h4v16h-4ZM16 20V7h4v13h-4Z"],
   "Accesos":["M6 10h12v10H6z","M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10","M12 14v2"],
@@ -142,6 +146,7 @@ export default function Home() {
   const [data, setData] = useState<DataSet | null>(null);
   const [create, setCreate] = useState<"location" | "supervisor" | "role" | null>(null);
   const [editSupervisor, setEditSupervisor] = useState<SupervisorRow | null>(null);
+  const [editRole,setEditRole]=useState<RoleRow|null>(null);
   const [notice, setNotice] = useState("");
   const [weekStart, setWeekStart] = useState(SCHEDULE_MIN_DATE);
   const [reportLocation, setReportLocation] = useState("");
@@ -557,6 +562,31 @@ export default function Home() {
     }
   }
 
+  async function updateRole(form:FormData){
+    if(!editRole)return;
+    const response=await apiFetch("/api/data",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"updateRole",id:editRole.id,name:form.get("name"),color:form.get("color")})});
+    const result=await response.json().catch(()=>({error:"No se pudo actualizar el rol"})) as {error?:string};
+    if(!response.ok){setNotice(`Error: ${result.error}`);return;}
+    setEditRole(null);setNotice("✓ Rol actualizado; los horarios históricos se conservaron");await loadData();
+  }
+
+  async function archiveRole(role:RoleRow){
+    if(!window.confirm(`¿Quitar el rol “${role.name}”? Ya no aparecerá para nuevos turnos, pero seguirá visible en los horarios históricos.`))return;
+    const response=await apiFetch("/api/data",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"archiveRole",id:role.id})});
+    const result=await response.json().catch(()=>({error:"No se pudo quitar el rol"})) as {error?:string};
+    if(!response.ok){setNotice(`Error: ${result.error}`);return;}
+    setNotice("✓ Rol retirado sin borrar el historial");await loadData();
+  }
+
+  async function publishWeeklyActivity(activityType:"shopper_purchase"|"shopper_delivery"|"supervisor_schedule"){
+    const selected=data?.locations.find(item=>item.name===location);
+    if(!selected){setNotice("Selecciona un solo local antes de publicar la semana");return;}
+    const response=await apiFetch("/api/compliance",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({locationId:selected.id,weekStart,activityType})});
+    const result=await response.json().catch(()=>({error:"No se pudo publicar la actividad"})) as {publishedBy?:string;error?:string};
+    if(!response.ok){setNotice(`Error: ${result.error}`);return;}
+    setNotice(`✓ Semana publicada por ${result.publishedBy||data?.currentUser.name}`);
+  }
+
   function openSupervisorEditor(person: Person) {
     const supervisor = data?.supervisors.find(s => s.id === person.id);
     if (supervisor) setEditSupervisor(supervisor);
@@ -908,7 +938,7 @@ export default function Home() {
       <section className="workspace">
         <header>
           <div><p className="eyebrow">CONTROL OPERATIVO REGIONAL</p><h1>{navigationLabel(active)}</h1><p>Planificación y control semanal de supervisión</p></div>
-          {active!=="Calificación administrador"&&<div className="header-actions"><button className="secondary" onClick={() => window.print()}>⇩ Exportar</button><button className="primary" onClick={() => {setActive("Horarios");if(!people.length)setCreate("supervisor");else setNotice("Selecciona una celda para crear o modificar un turno");}}>＋ Nuevo horario</button></div>}
+          {!['Calificación administrador','Autorizaciones','Cumplimiento semanal'].includes(active)&&<div className="header-actions"><button className="secondary" onClick={() => window.print()}>⇩ Exportar</button><button className="primary" onClick={() => {setActive("Horarios");if(!people.length)setCreate("supervisor");else setNotice("Selecciona una celda para crear o modificar un turno");}}>＋ Nuevo horario</button></div>}
         </header>
 
         {active==="Panel general"&&<section className="presence-card">
@@ -932,7 +962,7 @@ export default function Home() {
           </div>}
         </section>}
 
-        {active!=="Calificación administrador"&&<section className="kpis">
+        {!['Calificación administrador','Autorizaciones','Cumplimiento semanal'].includes(active)&&<section className="kpis">
           <article><span>Supervisores activos</span><strong>{data?.supervisors.filter(s=>s.active===1).length ?? people.length}</strong><small className="ok">● Nómina disponible</small></article>
           <article><span>Horas planificadas</span><strong>{displayHours(people.reduce((n,p) => n + hoursFor(p),0))} h</strong><small>Calculadas según cada rango</small></article>
           <article><span>Cobertura semanal</span><strong>96%</strong><div className="progress"><i /></div></article>
@@ -940,7 +970,7 @@ export default function Home() {
         </section>}
 
         {(active === "Panel general" || active === "Horarios") && <section className="schedule-card" ref={scheduleRef}>
-          <div className="schedule-title"><div><h2>Horario semanal</h2><p>Puedes editar nombres, quitar filas y modificar los turnos de tus locales asignados. Las semanas anteriores conservan su historial.</p></div><div className="schedule-actions"><button className="schedule-action-button" onClick={() => setCreate("supervisor")}>＋ Agregar supervisor</button><button className="schedule-action-button" onClick={()=>void copyWeek()}>▣ Copiar semana</button><button className="schedule-action-button image-action" onClick={()=>void downloadScheduleImage()}>▧ Descargar imagen</button></div></div>
+          <div className="schedule-title"><div><h2>Horario semanal</h2><p>Puedes editar nombres, quitar filas y modificar los turnos de tus locales asignados. Las semanas anteriores conservan su historial.</p></div><div className="schedule-actions"><button className="schedule-action-button publish-action" onClick={()=>void publishWeeklyActivity("supervisor_schedule")}>✓ Publicar semana</button><button className="schedule-action-button" onClick={() => setCreate("supervisor")}>＋ Agregar supervisor</button><button className="schedule-action-button" onClick={()=>void copyWeek()}>▣ Copiar semana</button><button className="schedule-action-button image-action" onClick={()=>void downloadScheduleImage()}>▧ Descargar imagen</button></div></div>
           <div className="toolbar">
             <div className="week"><button aria-label="Semana anterior" onClick={() => changeWeek(-1)}>‹</button><strong>{weekLabel}</strong><button aria-label="Semana siguiente" onClick={() => changeWeek(1)}>›</button></div>
             <select value={location} onChange={e => setLocation(e.target.value)}>{isAdmin && <option>Todos los locales</option>}{(data?.locations.map(l => l.name) ?? locations.slice(1)).map(l => <option key={l}>{l}</option>)}</select>
@@ -959,7 +989,7 @@ export default function Home() {
         {active==="Shoppers"&&<section className="schedule-card shopper-schedule" ref={shopperScheduleRef}>
           <div className="shopper-view-tabs"><button className={shopperView==="schedule"?"active":""} onClick={()=>setShopperView("schedule")}><i>▦</i><span><strong>Horarios</strong><small>Programación semanal</small></span></button><button className={shopperView==="directory"?"active":""} onClick={()=>setShopperView("directory")}><i>⌕</i><span><strong>Repositorio de shoppers</strong><small>Buscar IDs y cambiar locales</small></span></button></div>
           {shopperView==="schedule"?<>
-          <div className="schedule-title"><div><h2>Horario de shoppers</h2><p>Programación por turnos del personal de tus locales asignados.</p></div><div className="schedule-actions shopper-actions"><button className="schedule-action-button" onClick={()=>setAddShopper(true)}>＋ Agregar fila</button><button className="schedule-action-button" onClick={()=>setAddShopperShift(true)}>＋ Crear turno</button><button className="schedule-action-button" onClick={()=>void copyShopperWeek()}>▣ Copiar semana</button><button className="schedule-action-button image-action" onClick={()=>setShopperImageChoice(true)}>▧ Descargar imagen</button></div></div>
+          <div className="schedule-title"><div><h2>Horario de shoppers</h2><p>Programación por turnos del personal de tus locales asignados.</p></div><div className="schedule-actions shopper-actions"><button className="schedule-action-button publish-action" onClick={()=>void publishWeeklyActivity(shopperCategory==="purchase"?"shopper_purchase":"shopper_delivery")}>✓ Publicar {shopperCategory==="purchase"?"compra":"entrega"}</button><button className="schedule-action-button" onClick={()=>setAddShopper(true)}>＋ Agregar fila</button><button className="schedule-action-button" onClick={()=>setAddShopperShift(true)}>＋ Crear turno</button><button className="schedule-action-button" onClick={()=>void copyShopperWeek()}>▣ Copiar semana</button><button className="schedule-action-button image-action" onClick={()=>setShopperImageChoice(true)}>▧ Descargar imagen</button></div></div>
           <div className="shopper-submenu"><button className={shopperCategory==="purchase"?"active":""} onClick={()=>setShopperCategory("purchase")}>Asesores de compra</button><button className={shopperCategory==="delivery"?"active":""} onClick={()=>setShopperCategory("delivery")}>Repartidores</button></div>
           <div className="toolbar"><div className="week"><button onClick={()=>changeWeek(-1)}>‹</button><strong>{weekLabel}</strong><button onClick={()=>changeWeek(1)}>›</button></div><select value={location} onChange={e=>setLocation(e.target.value)}>{isAdmin&&<option>Todos los locales</option>}{data?.locations.map(l=><option key={l.id}>{l.name}</option>)}</select></div>
           {(()=>{
@@ -990,11 +1020,13 @@ export default function Home() {
         </section>}
 
         {active === "Turnos y roles" && <section className="management-card">
-          <div className="management-head"><div><h2>Turnos y roles</h2><p>Crea las actividades utilizadas en cada horario.</p></div><button className="primary" onClick={() => setCreate("role")}>＋ Crear rol</button></div>
-          <div className="role-grid">{(data?.roles ?? []).map(r => <article key={r.id}><i className={`role-dot ${r.color}`} /><strong>{r.name}</strong><span className="status">Disponible</span></article>)}</div>
+          <div className="management-head"><div><h2>Turnos y roles</h2><p>Crea, edita o retira actividades sin borrar los horarios anteriores.</p></div><button className="primary" onClick={() => setCreate("role")}>＋ Crear rol</button></div>
+          <div className="role-grid editable-roles">{(data?.roles ?? []).map(r => <article key={r.id}><i className={`role-dot ${r.color}`} /><strong>{r.name}</strong><span className="status">Disponible</span><div className="role-actions"><button onClick={()=>setEditRole(r)}>Editar</button><button className="remove" onClick={()=>void archiveRole(r)}>Quitar</button></div></article>)}</div>
         </section>}
 
         {active === "Calificación administrador" && data && <AdministratorRatings locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
+        {active === "Autorizaciones" && data && <Authorizations locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
+        {active === "Cumplimiento semanal" && isAdmin && data && <WeeklyCompliance locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
 
         {active === "Reportes" && <section className="management-card">
           <div className="report-type-tabs"><button className={reportType==="supervisor"?"active":""} onClick={()=>setReportType("supervisor")}><i>♙</i><span><strong>Supervisores</strong><small>Horas y roles por local</small></span></button><button className={reportType==="shopper"?"active":""} onClick={()=>setReportType("shopper")}><i>♟</i><span><strong>Shoppers</strong><small>Turnos de compra y entrega</small></span></button></div>
@@ -1068,6 +1100,7 @@ export default function Home() {
         {create === "role" && <label>Color<select name="color"><option value="blue">Azul</option><option value="green">Verde</option><option value="orange">Naranja</option><option value="yellow">Amarillo</option><option value="purple">Morado</option></select></label>}
         <button className="primary save">Guardar</button>
       </form></div>}
+      {editRole&&<div className="modal-backdrop" onMouseDown={()=>setEditRole(null)}><form className="modal role-editor" onSubmit={event=>{event.preventDefault();void updateRole(new FormData(event.currentTarget));}} onMouseDown={event=>event.stopPropagation()}><button type="button" className="close" onClick={()=>setEditRole(null)}>×</button><span className="modal-kicker">EDITAR ROL</span><h2>{editRole.name}</h2><p>El cambio se aplicará a los nuevos horarios y conservará el histórico.</p><label>Nombre<input name="name" required minLength={2} defaultValue={editRole.name}/></label><label>Color<select name="color" defaultValue={editRole.color}><option value="blue">Azul</option><option value="green">Verde</option><option value="orange">Naranja</option><option value="yellow">Amarillo</option><option value="purple">Morado</option></select></label><button className="primary save">Guardar cambios</button></form></div>}
       {editSupervisor && <div className="modal-backdrop" onMouseDown={() => setEditSupervisor(null)}><form className="modal" onSubmit={e => {e.preventDefault(); void updateSupervisor(new FormData(e.currentTarget));}} onMouseDown={e => e.stopPropagation()}>
         <button type="button" className="close" onClick={() => setEditSupervisor(null)}>×</button>
         <span className="modal-kicker">EDITAR SUPERVISOR</span><h2>{editSupervisor.name}</h2><p>Los cambios conservarán todo su historial de horarios.</p>

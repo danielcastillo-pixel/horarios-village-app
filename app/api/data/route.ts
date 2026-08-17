@@ -95,6 +95,12 @@ export async function POST(request:NextRequest) {
     });
   }
   else if(body.action==="addRole") result=await db.from("roles").insert({name:String(body.name).trim(),color:body.color,counts_hours:!["Descanso","Libre","Vacaciones"].includes(String(body.name))});
+  else if(body.action==="updateRole"){
+    const name=String(body.name||"").trim();
+    if(name.length<2)return NextResponse.json({error:"Escribe un nombre válido para el rol"},{status:400});
+    result=await db.from("roles").update({name,color:String(body.color||"blue"),counts_hours:!["Descanso","Libre","Vacaciones"].includes(name),active:true}).eq("id",Number(body.id));
+  }
+  else if(body.action==="archiveRole") result=await db.from("roles").update({active:false}).eq("id",Number(body.id));
   else if(body.action==="updateSupervisor"){
     const changes:Record<string,unknown>={name:String(body.name).trim(),location_id:Number(body.locationId)};
     if(body.active!==undefined)changes.active=Boolean(Number(body.active));
