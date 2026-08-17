@@ -270,9 +270,10 @@ export default function Home() {
     if (active === "Accesos" && data?.currentUser.role === "admin") void loadAccessUsers();
   },[active,data?.currentUser.role]);
   useEffect(()=>{
+    if(!data||accessState!=="authorized")return;
     if(active==="Shoppers"&&shopperView==="directory")void loadShopperDirectory();
     else if(active==="Panel general"||active==="Shoppers"||(active==="Reportes"&&reportType==="shopper"))void loadShoppers();
-  },[active,shopperCategory,reportType,shopperView]);
+  },[active,shopperCategory,reportType,shopperView,data,accessState]);
   useEffect(() => {
     if (!data) return;
     const weekFirst=dateKeys[0],weekLast=dateKeys[6];
