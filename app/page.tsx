@@ -457,7 +457,7 @@ export default function Home() {
       if(tableWrap)tableWrap.style.overflow="visible";
       await new Promise(resolve=>requestAnimationFrame(()=>resolve(null)));
       const dataUrl=await toPng(node,{
-        cacheBust:true,pixelRatio:2,backgroundColor:"#ffffff",
+        cacheBust:true,pixelRatio:3,backgroundColor:"#ffffff",
         width:node.scrollWidth,height:node.scrollHeight,
         filter:element=>!(element instanceof HTMLElement&&element.classList.contains("schedule-actions"))
       });
