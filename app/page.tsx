@@ -874,7 +874,13 @@ export default function Home() {
             return next;
           })}
         >{sidebarCollapsed?"›":"‹"}</button>
-        <div className="brand"><span>TIPTI · OPERACIONES</span><strong>Región Sur</strong></div>
+        <div className="brand">
+          <div className="brand-lockup">
+            <div className="brand-logo-frame"><img src="/tipti-logo.png" alt="Tipti" /></div>
+            <b>OPERACIONES</b>
+          </div>
+          <strong>Región Sur</strong>
+        </div>
         <nav>{visibleNav.map(([icon,label]) => <button key={label} title={sidebarCollapsed?navigationLabel(label):undefined} className={active === label ? "active" : ""} onClick={() => {setActive(label);setMobileMenuOpen(false)}}><i>{icon}</i><span>{navigationLabel(label)}</span></button>)}</nav>
         <div className="profile"><div className="avatar admin">{data?.currentUser.name.split(" ").map(x=>x[0]).join("").slice(0,2).toUpperCase()}</div><div><strong>{data?.currentUser.name}</strong><span>{isAdmin?"Administrador total":"Supervisor de local"}</span></div></div>
         <button className="logout" onClick={() => void signOutSafely()}>↪ Cerrar sesión</button>
