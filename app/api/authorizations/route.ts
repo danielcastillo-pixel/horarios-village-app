@@ -29,6 +29,7 @@ export async function GET(request:NextRequest){
   const {data,error}=await query;
   if(error)return NextResponse.json({error:error.message},{status:400});
   const requests=await Promise.all((data||[]).map(async row=>{
+    if(!row.evidence_path)return {...row,evidence_url:null};
     const {data:signed}=await auth.db.storage.from(BUCKET).createSignedUrl(row.evidence_path,900);
     return {...row,evidence_url:signed?.signedUrl||null};
   }));
@@ -56,13 +57,13 @@ export async function POST(request:NextRequest){
   if(shopperName.length<2||orderNumber.length<2||clientName.length<2)return NextResponse.json({error:"Completa shopper, número de pedido y cliente."},{status:400});
   if(!Number.isFinite(amount)||amount<=0||amount>999999.99)return NextResponse.json({error:"Ingresa un valor válido."},{status:400});
   if(reason.length<5)return NextResponse.json({error:"Explica la razón de la solicitud."},{status:400});
-  if(!evidencePath.startsWith(`${auth.profile.id}/`))return NextResponse.json({error:"La constancia adjunta no es válida."},{status:400});
+  if(requestType==="incentive"&&!evidencePath.startsWith(`${auth.profile.id}/`))return NextResponse.json({error:"Adjunta una constancia fotográfica válida para el incentivo."},{status:400});
   const {data:location}=await auth.db.from("locations").select("id,name").eq("id",locationId).eq("active",true).maybeSingle();
   if(!location)return NextResponse.json({error:"El local no está disponible para tu cuenta."},{status:403});
   const {data,error}=await auth.db.from("authorization_requests").insert({
     request_type:requestType,location_id:locationId,location_name_snapshot:location.name,
     shopper_name:shopperName,shopper_external_id:clean(body.shopperExternalId,80),order_number:orderNumber,
-    client_name:clientName,amount:Math.round(amount*100)/100,reason,evidence_path:evidencePath,status:"pending",
+    client_name:clientName,amount:Math.round(amount*100)/100,reason,evidence_path:requestType==="incentive"?evidencePath:null,status:"pending",
     created_by:auth.profile.id,created_by_name:auth.profile.full_name||auth.profile.email,created_by_email:auth.profile.email
   }).select("id").single();
   if(error)return NextResponse.json({error:error.message},{status:400});
