@@ -202,10 +202,10 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .sidebar::-webkit-scrollbar-thumb{background:#66696e}
 .desktop-menu-toggle{top:20px;border-color:#d9dde2;color:#3a3d42;box-shadow:0 4px 14px #20222524}
 .brand{gap:14px;padding:0 8px 18px}
-.brand-lockup{display:flex;align-items:center;gap:9px;min-height:50px}
-.brand-logo-frame{width:120px;height:50px;flex:0 0 120px;overflow:hidden;border:1px solid #ffffff24;border-radius:10px;background:var(--orange);box-shadow:0 6px 16px #1516174f}
-.brand-logo-frame img{display:block;width:130px;height:63px;max-width:none;transform:translate(-4px,-7px)}
-.brand-lockup b{color:#fff;font-size:11px;letter-spacing:.02em}
+.brand-lockup{display:grid;justify-items:start;gap:6px;min-height:82px}
+.brand-logo-frame{position:relative;width:150px;height:82px;overflow:hidden;border:1px solid #ffffff18;border-radius:13px;background:#35373b;box-shadow:0 7px 18px #1516174f}
+.brand-logo-frame img{position:absolute;left:50%;top:0;display:block;width:134px;height:auto;max-width:none;transform:translate(-50%,-23px)}
+.brand-lockup b{padding-left:3px;color:#f4f4f5;font-size:9px;letter-spacing:.16em}
 .brand>strong{display:flex;align-items:center;justify-content:space-between;min-height:48px;padding:0 14px;border:1px solid #ffffff0a;border-radius:9px;background:#3a3d42;color:#fff;font-size:14px;letter-spacing:0;box-shadow:inset 0 1px #ffffff08}
 .brand>strong:after{content:"⌄";font-size:15px;color:#d8dade}
 .sidebar nav{gap:4px}
@@ -274,18 +274,18 @@ th:first-child,td:first-child{min-width:160px}th:first-child{z-index:3;backgroun
 .app-shell.sidebar-collapsed{grid-template-columns:78px minmax(0,1fr)}
 .sidebar-collapsed .brand{min-height:64px;padding:0 4px 16px}
 .sidebar-collapsed .brand-lockup{justify-content:center}.sidebar-collapsed .brand-lockup b,.sidebar-collapsed .brand>strong{display:none}
-.sidebar-collapsed .brand-logo-frame{width:48px;height:42px;flex-basis:48px;border-radius:7px}.sidebar-collapsed .brand-logo-frame img{transform:translate(-25px,-10px)}
+.sidebar-collapsed .brand-logo-frame{width:48px;height:42px;border-radius:9px}.sidebar-collapsed .brand-logo-frame img{width:70px;transform:translate(-50%,-12px)}
 .sidebar-collapsed .brand:after{display:none}
 .sidebar-collapsed .logout{justify-content:center;font-size:12px;padding:10px}.sidebar-collapsed .logout span{display:none}.sidebar-collapsed .logout:first-letter{font-size:inherit}
 
 @media(max-width:1000px) and (min-width:681px){
-  .brand{min-height:64px;padding:0 4px 16px}.brand-lockup{justify-content:center}.brand-lockup b,.brand>strong{display:none}.brand-logo-frame{width:48px;height:42px;flex-basis:48px;border-radius:7px}.brand-logo-frame img{transform:translate(-25px,-10px)}.brand:after{display:none}
+  .brand{min-height:64px;padding:0 4px 16px}.brand-lockup{justify-items:center}.brand-lockup b,.brand>strong{display:none}.brand-logo-frame{width:48px;height:42px;border-radius:9px}.brand-logo-frame img{width:70px;transform:translate(-50%,-12px)}.brand:after{display:none}
   .logout{justify-content:center;font-size:12px}.logout span{display:none}.logout:first-letter{font-size:inherit}
 }
 @media(max-width:680px){
   .mobile-menu-toggle{background:#303236;box-shadow:0 7px 22px #2022253d}
   .mobile-menu-backdrop{background:#1d1e208c}.sidebar{background:linear-gradient(180deg,#303236,#242629)}
-  .brand{padding:0 42px 18px 8px}.brand-lockup{justify-content:flex-start}.brand-lockup b{display:block}.brand>strong{display:flex;font-size:13px}.brand-logo-frame{width:112px;height:46px;flex-basis:112px}.brand-logo-frame img{transform:translate(-4px,-8px)}
+  .brand{padding:0 42px 18px 8px}.brand-lockup{justify-items:start}.brand-lockup b{display:block}.brand>strong{display:flex;font-size:13px}.brand-logo-frame{width:142px;height:78px}.brand-logo-frame img{width:128px;transform:translate(-50%,-22px)}
   .logout{display:flex;justify-content:flex-start;gap:12px;font-size:14px}.logout span{display:inline}
   .workspace{padding:72px 12px 34px}header{padding-bottom:15px}header h1{font-size:25px}
   .kpis{gap:8px}.kpis article{min-height:102px;padding:14px 10px 12px 55px}.kpis article:before{left:11px;top:15px;width:34px;height:34px}.kpis strong{font-size:23px}.kpis span{font-size:10px}
