@@ -36,6 +36,7 @@ const adminNav = [
   ["◫", "Turnos y roles"], ["♟", "Shoppers"], ["★", "Calificación administrador"], ["⌂", "Locales"], ["▥", "Reportes"], ["⚿", "Accesos"]
 ];
 const supervisorNav = [["▣", "Horarios"],["♟", "Shoppers"],["★", "Calificación administrador"],["▥", "Reportes"]];
+const navigationLabel = (label:string) => label === "Horarios" ? "Horario Supervisor" : label === "Shoppers" ? "Horario Shoppers" : label;
 const UI_STATE_KEY="regional-ops-ui-state";
 const dataCacheKey=(email:string)=>`regional-ops-data-${email.toLowerCase()}`;
 const SCHEDULE_MIN_DATE="2026-07-27";
@@ -874,7 +875,7 @@ export default function Home() {
           })}
         >{sidebarCollapsed?"›":"‹"}</button>
         <div className="brand"><span>TIPTI · OPERACIONES</span><strong>Región Intercity</strong></div>
-        <nav>{visibleNav.map(([icon,label]) => <button key={label} title={sidebarCollapsed?label:undefined} className={active === label ? "active" : ""} onClick={() => {setActive(label);setMobileMenuOpen(false)}}><i>{icon}</i><span>{label}</span></button>)}</nav>
+        <nav>{visibleNav.map(([icon,label]) => <button key={label} title={sidebarCollapsed?navigationLabel(label):undefined} className={active === label ? "active" : ""} onClick={() => {setActive(label);setMobileMenuOpen(false)}}><i>{icon}</i><span>{navigationLabel(label)}</span></button>)}</nav>
         <div className="profile"><div className="avatar admin">{data?.currentUser.name.split(" ").map(x=>x[0]).join("").slice(0,2).toUpperCase()}</div><div><strong>{data?.currentUser.name}</strong><span>{isAdmin?"Administrador total":"Supervisor de local"}</span></div></div>
         <button className="logout" onClick={() => void signOutSafely()}>↪ Cerrar sesión</button>
         {isAdmin && <button className="settings" onClick={() => {setActive("Configuración");setMobileMenuOpen(false)}}>⚙ Configuración</button>}
@@ -882,7 +883,7 @@ export default function Home() {
 
       <section className="workspace">
         <header>
-          <div><p className="eyebrow">CONTROL OPERATIVO REGIONAL</p><h1>{active}</h1><p>Planificación y control semanal de supervisión</p></div>
+          <div><p className="eyebrow">CONTROL OPERATIVO REGIONAL</p><h1>{navigationLabel(active)}</h1><p>Planificación y control semanal de supervisión</p></div>
           {active!=="Calificación administrador"&&<div className="header-actions"><button className="secondary" onClick={() => window.print()}>⇩ Exportar</button><button className="primary" onClick={() => {setActive("Horarios");if(!people.length)setCreate("supervisor");else setNotice("Selecciona una celda para crear o modificar un turno");}}>＋ Nuevo horario</button></div>}
         </header>
 
