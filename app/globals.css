@@ -203,7 +203,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .desktop-menu-toggle{top:20px;border-color:#d9dde2;color:#3a3d42;box-shadow:0 4px 14px #20222524}
 .brand{gap:14px;padding:0 8px 18px}
 .brand-lockup{display:flex;align-items:center;gap:9px;min-height:50px}
-.brand-logo-frame{width:120px;height:50px;flex:0 0 120px;overflow:hidden;border-radius:2px;background:var(--orange);box-shadow:0 5px 14px #15161742}
+.brand-logo-frame{width:120px;height:50px;flex:0 0 120px;overflow:hidden;border:1px solid #ffffff24;border-radius:10px;background:var(--orange);box-shadow:0 6px 16px #1516174f}
 .brand-logo-frame img{display:block;width:130px;height:63px;max-width:none;transform:translate(-4px,-7px)}
 .brand-lockup b{color:#fff;font-size:11px;letter-spacing:.02em}
 .brand>strong{display:flex;align-items:center;justify-content:space-between;min-height:48px;padding:0 14px;border:1px solid #ffffff0a;border-radius:9px;background:#3a3d42;color:#fff;font-size:14px;letter-spacing:0;box-shadow:inset 0 1px #ffffff08}
@@ -211,13 +211,15 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .sidebar nav{gap:4px}
 .sidebar nav button,.settings{min-height:48px;border-radius:8px;padding:12px 14px;color:#f0f1f2;font-size:13px;font-weight:650}
 .sidebar nav button:hover,.settings:hover{background:#ffffff0b;color:#fff}
-.sidebar nav button i{width:25px;color:#f2f3f4;font-size:19px}
+.sidebar nav button i{width:25px;display:grid;place-items:center;color:#f2f3f4;font-size:19px}
+.nav-icon{display:block;width:20px;height:20px;overflow:visible}
 .sidebar nav button.active{background:#41444a;color:var(--orange);box-shadow:inset 4px 0 var(--orange),0 5px 14px #17181926}
 .sidebar nav button.active i{color:var(--orange)}
 .profile{border-color:#4a4c50;padding:18px 10px 14px}
 .profile span{color:#c1c3c7}
 .avatar.admin{background:#eceef1;color:#34373b}
-.logout{border-color:#55585d;background:#303236;color:#f5f5f5}
+.logout{display:flex;align-items:center;gap:12px;border-color:#55585d;background:#303236;color:#f5f5f5;font-size:12px}
+.logout i,.settings i{width:22px;display:grid;place-items:center;font-style:normal}.logout .nav-icon,.settings .nav-icon{width:18px;height:18px}
 .logout:hover{border-color:var(--orange);background:#3d3f44;color:#ffad80}
 .workspace{padding:24px 30px 46px}
 header{margin-bottom:20px;padding:0 0 20px;border-bottom:1px solid #e1e4e8}
@@ -274,14 +276,17 @@ th:first-child,td:first-child{min-width:160px}th:first-child{z-index:3;backgroun
 .sidebar-collapsed .brand-lockup{justify-content:center}.sidebar-collapsed .brand-lockup b,.sidebar-collapsed .brand>strong{display:none}
 .sidebar-collapsed .brand-logo-frame{width:48px;height:42px;flex-basis:48px;border-radius:7px}.sidebar-collapsed .brand-logo-frame img{transform:translate(-25px,-10px)}
 .sidebar-collapsed .brand:after{display:none}
+.sidebar-collapsed .logout{justify-content:center;font-size:12px;padding:10px}.sidebar-collapsed .logout span{display:none}.sidebar-collapsed .logout:first-letter{font-size:inherit}
 
 @media(max-width:1000px) and (min-width:681px){
   .brand{min-height:64px;padding:0 4px 16px}.brand-lockup{justify-content:center}.brand-lockup b,.brand>strong{display:none}.brand-logo-frame{width:48px;height:42px;flex-basis:48px;border-radius:7px}.brand-logo-frame img{transform:translate(-25px,-10px)}.brand:after{display:none}
+  .logout{justify-content:center;font-size:12px}.logout span{display:none}.logout:first-letter{font-size:inherit}
 }
 @media(max-width:680px){
   .mobile-menu-toggle{background:#303236;box-shadow:0 7px 22px #2022253d}
   .mobile-menu-backdrop{background:#1d1e208c}.sidebar{background:linear-gradient(180deg,#303236,#242629)}
   .brand{padding:0 42px 18px 8px}.brand-lockup{justify-content:flex-start}.brand-lockup b{display:block}.brand>strong{display:flex;font-size:13px}.brand-logo-frame{width:112px;height:46px;flex-basis:112px}.brand-logo-frame img{transform:translate(-4px,-8px)}
+  .logout{display:flex;justify-content:flex-start;gap:12px;font-size:14px}.logout span{display:inline}
   .workspace{padding:72px 12px 34px}header{padding-bottom:15px}header h1{font-size:25px}
   .kpis{gap:8px}.kpis article{min-height:102px;padding:14px 10px 12px 55px}.kpis article:before{left:11px;top:15px;width:34px;height:34px}.kpis strong{font-size:23px}.kpis span{font-size:10px}
   .toolbar{margin:0 12px 12px;padding:9px}.schedule-title{padding:16px 14px 10px}

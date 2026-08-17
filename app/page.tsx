@@ -37,6 +37,24 @@ const adminNav = [
 ];
 const supervisorNav = [["▣", "Horarios"],["♟", "Shoppers"],["★", "Calificación administrador"],["▥", "Reportes"]];
 const navigationLabel = (label:string) => label === "Horarios" ? "Horario Supervisor" : label === "Shoppers" ? "Horario Shoppers" : label;
+const navigationIconPaths:Record<string,string[]> = {
+  "Panel general":["M3 11.5 12 4l9 7.5","M5.5 10.5V20h13v-9.5","M9.5 20v-6h5v6"],
+  "Horarios":["M4 5h16v15H4z","M8 3v4M16 3v4M4 9h16","M8 13h2M14 13h2M8 17h2M14 17h2"],
+  "Supervisores":["M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z","M4.5 21a7.5 7.5 0 0 1 15 0"],
+  "Turnos y roles":["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z","M12 7v5l3 2"],
+  "Shoppers":["M4 5h16v15H4z","M8 3v4M16 3v4M4 9h16","M8 13h8M8 17h5"],
+  "Calificación administrador":["m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9L6.6 20l1-6.1-4.4-4.3 6.1-.9L12 3Z"],
+  "Locales":["M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z","M12 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"],
+  "Reportes":["M4 20V10h4v10H4ZM10 20V4h4v16h-4ZM16 20V7h4v13h-4Z"],
+  "Accesos":["M6 10h12v10H6z","M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10","M12 14v2"],
+  "Configuración":["M4 6h10M18 6h2M4 12h2M10 12h10M4 18h7M15 18h5","M14 4v4M6 10v4M11 16v4"],
+  "Cerrar sesión":["M10 5H5v14h5","m14 8 4 4-4 4","M18 12H9"]
+};
+
+function NavigationIcon({label}:{label:string}){
+  const paths=navigationIconPaths[label]??navigationIconPaths["Panel general"];
+  return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths.map((path,index)=><path key={index} d={path} />)}</svg>;
+}
 const UI_STATE_KEY="regional-ops-ui-state";
 const dataCacheKey=(email:string)=>`regional-ops-data-${email.toLowerCase()}`;
 const SCHEDULE_MIN_DATE="2026-07-27";
@@ -881,10 +899,10 @@ export default function Home() {
           </div>
           <strong>Región Sur</strong>
         </div>
-        <nav>{visibleNav.map(([icon,label]) => <button key={label} title={sidebarCollapsed?navigationLabel(label):undefined} className={active === label ? "active" : ""} onClick={() => {setActive(label);setMobileMenuOpen(false)}}><i>{icon}</i><span>{navigationLabel(label)}</span></button>)}</nav>
+        <nav>{visibleNav.map(([,label]) => <button key={label} title={sidebarCollapsed?navigationLabel(label):undefined} className={active === label ? "active" : ""} onClick={() => {setActive(label);setMobileMenuOpen(false)}}><i><NavigationIcon label={label} /></i><span>{navigationLabel(label)}</span></button>)}</nav>
         <div className="profile"><div className="avatar admin">{data?.currentUser.name.split(" ").map(x=>x[0]).join("").slice(0,2).toUpperCase()}</div><div><strong>{data?.currentUser.name}</strong><span>{isAdmin?"Administrador total":"Supervisor de local"}</span></div></div>
-        <button className="logout" onClick={() => void signOutSafely()}>↪ Cerrar sesión</button>
-        {isAdmin && <button className="settings" onClick={() => {setActive("Configuración");setMobileMenuOpen(false)}}>⚙ Configuración</button>}
+        <button className="logout" onClick={() => void signOutSafely()}><i><NavigationIcon label="Cerrar sesión" /></i><span>Cerrar sesión</span></button>
+        {isAdmin && <button className="settings" onClick={() => {setActive("Configuración");setMobileMenuOpen(false)}}><i><NavigationIcon label="Configuración" /></i><span>Configuración</span></button>}
       </aside>
 
       <section className="workspace">
