@@ -79,7 +79,7 @@ th:first-child { z-index:2; background:#fbfcfd; padding-left:12px; }
 .person-name { border:0; background:transparent; color:#13233b; padding:0; text-align:left; font-size:12px; font-weight:800; white-space:nowrap; }
 .person-name span { color:#ff6108; opacity:0; transition:.16s; }.person-name:hover span,.person-name:focus-visible span { opacity:1; }
 .shopper-name-line{display:flex;align-items:center;justify-content:space-between;gap:7px;min-width:0}.shopper-name-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#13233b;font-size:12px;font-weight:800}.shopper-row-actions{display:flex;align-items:center;gap:4px;flex:0 0 auto;opacity:0;transform:translateX(4px);transition:.16s ease}.person:hover .shopper-row-actions,.shopper-row-actions:focus-within{opacity:1;transform:none}.shopper-action{width:27px;height:27px;display:grid;place-items:center;flex:0 0 27px;border-radius:7px;background:#fff;transition:.16s ease}.shopper-action svg{width:14px;height:14px;fill:currentColor}.shopper-action.edit{border:1px solid #b9d6ff;color:#1264d8;background:#f4f8ff}.shopper-action.delete{border:1px solid #ffc8bd;color:#d53e29;background:#fff6f3}.shopper-action:hover{color:#fff;transform:translateY(-1px);box-shadow:0 4px 10px #102f4d1b}.shopper-action.edit:hover{background:#1264d8;border-color:#1264d8}.shopper-action.delete:hover{background:#d53e29;border-color:#d53e29}
-.shopper-table-compact th,.shopper-table-compact td{padding:4px 5px}.shopper-table-compact .turn-code{min-width:50px;min-height:36px;border-radius:6px;font-size:12px}.shopper-table-compact .person{gap:5px;padding:0 2px}.shopper-table-compact .avatar{width:25px;height:25px;font-size:9px}.shopper-table-compact .shopper-name-text{font-size:10px}.shopper-table-compact .person small{font-size:8px}.shopper-table-compact .shopper-action{width:22px;height:22px;flex-basis:22px;border-radius:5px}.shopper-table-compact .shopper-action svg{width:11px;height:11px}
+.shopper-table-compact table{min-width:820px}.shopper-table-compact th{height:25px;font-size:9px}.shopper-table-compact th,.shopper-table-compact td{padding:1px 2px}.shopper-table-compact th:first-child,.shopper-table-compact td:first-child{min-width:190px}.shopper-table-compact .turn-code{min-width:38px;min-height:27px;border-radius:2px;font-size:11px;line-height:1}.shopper-table-compact .person{gap:4px;padding:0 2px}.shopper-table-compact .avatar{width:20px;height:20px;flex-basis:20px;font-size:7px}.shopper-table-compact .person-info{gap:0}.shopper-table-compact .shopper-name-text{font-size:9px}.shopper-table-compact .person small{max-width:155px;font-size:7px;line-height:1.1}.shopper-table-compact .shopper-inline-id{font-size:7px}.shopper-table-compact .hours{font-size:9px}.shopper-table-compact .shopper-action{width:18px;height:18px;flex-basis:18px;border-radius:3px}.shopper-table-compact .shopper-action svg{width:9px;height:9px}
 .shopper-inline-id{display:inline;padding:0;margin-left:4px;border-radius:0;background:transparent;color:#55718d;font-size:8px;font-weight:800;white-space:nowrap}.shopper-hours{color:#0b6746;background:#effaf5}
 .image-choice-modal{width:min(560px,100%)}.image-choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:18px}.image-choice-grid button{display:grid;gap:7px;padding:18px;border:1px solid #d8e1ea;border-radius:12px;background:#f8fafc;text-align:left;color:#102f4d;transition:.18s ease}.image-choice-grid button:hover{transform:translateY(-2px);border-color:#ff6813;background:#fff7f1;box-shadow:0 9px 20px #102f4d18}.image-choice-grid button>span{font-size:26px;line-height:1;color:#ff6813}.image-choice-grid button strong{font-size:15px}.image-choice-grid button small{color:#718096;line-height:1.45}
 .remove-row { width:20px; height:20px; flex:0 0 20px; border:0; border-radius:50%; background:#f1f4f7; color:#7a8798; font-size:10px; font-weight:800; }
@@ -158,5 +158,19 @@ th:first-child { z-index:2; background:#fbfcfd; padding-left:12px; }
   .modal-backdrop{place-items:start center;padding:10px}.modal{max-height:calc(100dvh - 20px);padding:24px 20px;border-radius:13px}.close{top:-13px;margin-right:-3px}.time-row{grid-template-columns:1fr}.confirm-actions{grid-template-columns:1fr}.shopper-row-actions{opacity:1;transform:none}.shopper-action{width:29px;height:29px;flex-basis:29px}
 }
 @media print{.sidebar,.header-actions,.toolbar,.copy{display:none!important}.app-shell{display:block}.workspace{padding:0}.schedule-card{border:0}.kpis{break-inside:avoid}}
+
+/* Densidad tipo Excel para equipos grandes y sus imágenes de WhatsApp. */
+.shopper-export-sheet{width:1180px;padding:10px;background:#fff}
+.shopper-export-head{gap:12px;margin-bottom:6px;padding:8px 10px;border-radius:4px;border-left-width:4px}
+.shopper-export-head h2{margin-bottom:2px;font-size:16px}
+.shopper-export-head p{font-size:8px}
+.shopper-export-legend{gap:3px;max-width:600px}
+.shopper-export-legend span{padding:2px 5px;border-radius:3px;font-size:7px}
+.shopper-export-grid{gap:6px}
+.shopper-export-sheet table{border-collapse:collapse;border-color:#9aa8b7;border-radius:0}
+.shopper-export-sheet th,.shopper-export-sheet td{height:18px;padding:1px 2px;border-color:#b8c2cd}
+.shopper-export-sheet th{height:20px}
+.shopper-export-sheet th:first-child,.shopper-export-sheet td:first-child{width:260px;min-width:260px;padding-left:5px}
+.shopper-export-sheet td:first-child{border-left:0}
 
 /* Build trigger: shopper schedule usability update */
