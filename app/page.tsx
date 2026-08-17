@@ -7,6 +7,7 @@ import * as XLSX from "xlsx-js-style";
 import AdministratorRatings from "./AdministratorRatings";
 import Authorizations from "./Authorizations";
 import WeeklyCompliance from "./WeeklyCompliance";
+import DashboardInsights from "./DashboardInsights";
 
 type Shift = { time: string; role: string; tone: "blue" | "green" | "orange" | "yellow" };
 type Person = { id: number; name: string; location: string; initials: string; shifts: (Shift | null)[] };
@@ -941,6 +942,8 @@ export default function Home() {
           {!['Calificación administrador','Autorizaciones','Cumplimiento semanal'].includes(active)&&<div className="header-actions"><button className="secondary" onClick={() => window.print()}>⇩ Exportar</button><button className="primary" onClick={() => {setActive("Horarios");if(!people.length)setCreate("supervisor");else setNotice("Selecciona una celda para crear o modificar un turno");}}>＋ Nuevo horario</button></div>}
         </header>
 
+        {active==="Panel general"&&isAdmin&&data&&<DashboardInsights locations={data.locations} apiFetch={apiFetch} setNotice={setNotice} onNavigate={section=>setActive(section)} />}
+
         {active==="Panel general"&&<section className="presence-card">
           <div className="presence-heading"><div><span className="presence-live-dot" /><div><h2>¿Quién está de turno?</h2><p>Consulta el personal programado por local, fecha y hora.</p></div></div><span className="presence-now">Consulta operativa</span></div>
           <div className="presence-filters">
@@ -962,14 +965,14 @@ export default function Home() {
           </div>}
         </section>}
 
-        {!['Calificación administrador','Autorizaciones','Cumplimiento semanal'].includes(active)&&<section className="kpis">
+        {!['Panel general','Calificación administrador','Autorizaciones','Cumplimiento semanal'].includes(active)&&<section className="kpis">
           <article><span>Supervisores activos</span><strong>{data?.supervisors.filter(s=>s.active===1).length ?? people.length}</strong><small className="ok">● Nómina disponible</small></article>
           <article><span>Horas planificadas</span><strong>{displayHours(people.reduce((n,p) => n + hoursFor(p),0))} h</strong><small>Calculadas según cada rango</small></article>
           <article><span>Cobertura semanal</span><strong>96%</strong><div className="progress"><i /></div></article>
           <article><span>{isAdmin?"Locales registrados":"Local asignado"}</span><strong>{data?.locations.length ?? 0}</strong><small className="warn">{isAdmin?"Administrables":"Acceso limitado"}</small></article>
         </section>}
 
-        {(active === "Panel general" || active === "Horarios") && <section className="schedule-card" ref={scheduleRef}>
+        {active === "Horarios" && <section className="schedule-card" ref={scheduleRef}>
           <div className="schedule-title"><div><h2>Horario semanal</h2><p>Puedes editar nombres, quitar filas y modificar los turnos de tus locales asignados. Las semanas anteriores conservan su historial.</p></div><div className="schedule-actions"><button className="schedule-action-button publish-action" onClick={()=>void publishWeeklyActivity("supervisor_schedule")}>✓ Publicar semana</button><button className="schedule-action-button" onClick={() => setCreate("supervisor")}>＋ Agregar supervisor</button><button className="schedule-action-button" onClick={()=>void copyWeek()}>▣ Copiar semana</button><button className="schedule-action-button image-action" onClick={()=>void downloadScheduleImage()}>▧ Descargar imagen</button></div></div>
           <div className="toolbar">
             <div className="week"><button aria-label="Semana anterior" onClick={() => changeWeek(-1)}>‹</button><strong>{weekLabel}</strong><button aria-label="Semana siguiente" onClick={() => changeWeek(1)}>›</button></div>
