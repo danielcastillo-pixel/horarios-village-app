@@ -69,17 +69,26 @@ export async function POST(request:NextRequest){
     const free=Boolean(body.isFree);
     const code=String(body.code||"").trim().toUpperCase(),label=String(body.label||"").trim();
     const category=["purchase","delivery","both"].includes(body.category)?body.category:null;
+    const locationId=Number(body.locationId);
     if(!/^[A-Z0-9_-]{1,6}$/.test(code))return NextResponse.json({error:"El código debe tener entre 1 y 6 letras o números"},{status:400});
     if(!label)return NextResponse.json({error:"Escribe el nombre del turno"},{status:400});
     if(!category)return NextResponse.json({error:"La categoría del turno no es válida"},{status:400});
+    if(!Number.isFinite(locationId)||locationId<=0)return NextResponse.json({error:"Selecciona el local al que pertenece el turno"},{status:400});
     if(!free&&(!/^\d{2}:\d{2}$/.test(String(body.start||""))||!/^\d{2}:\d{2}$/.test(String(body.end||""))))return NextResponse.json({error:"Selecciona una hora de inicio y una hora de fin válidas"},{status:400});
-    const {error}=await db.from("shopper_shift_types").insert({
+    const values={
       code,label,start_time:free?null:body.start,end_time:free?null:body.end,
-      category,location_id:body.locationId||null,
+      category,location_id:locationId,
       counts_opening:free?false:Boolean(body.countsOpening),
       counts_closing:free?false:Boolean(body.countsClosing),is_free:free
-    });
-    if(error)return NextResponse.json({error:databaseError(error,"No se pudo crear el turno")},{status:400});
+    };
+    const {data:existing,error:existingError}=await db.from("shopper_shift_types").select("id").eq("code",code).eq("category",category).eq("location_id",locationId).maybeSingle();
+    if(existingError)return NextResponse.json({error:databaseError(existingError,"No se pudo validar el turno del local")},{status:400});
+    const operation=existing
+      ?db.from("shopper_shift_types").update({...values,active:true}).eq("id",existing.id)
+      :db.from("shopper_shift_types").insert(values);
+    const {error}=await operation;
+    if(error)return NextResponse.json({error:databaseError(error,"No se pudo crear el turno para este local")},{status:400});
+    return NextResponse.json({ok:true,updated:Boolean(existing)});
   }else if(body.action==="saveTurn"){
     const staffId=Number(body.staffId),turnCode=String(body.turnCode||"").trim().toUpperCase();
     if(!Number.isFinite(staffId))return NextResponse.json({error:"El shopper seleccionado no es válido"},{status:400});
