@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import * as XLSX from "xlsx";
+import * as XLSX from "xlsx-js-style";
 
 type LocationRow={id:number;name:string;city:string;active:number};
 type CurrentUser={email:string;name:string;role:"admin"|"supervisor";locationId:number|null;locationIds:number[]};
@@ -9,6 +9,7 @@ type RatingResult={compliant_count:number;applicable_count:number;score:number;s
 type RatingEvaluation={
   id:number;location_id:number;location_name:string;city:string;week_start:string;week_end:string;
   visit_date:string;next_visit_date:string|null;administrator_name:string;administrator_position:string;administrator_phone:string;
+  metrics_socialized:boolean;
   rule_compliance:boolean|null;uniform_compliance:boolean|null;ethics_compliance:boolean|null;
   punctuality_compliance:boolean|null;no_team_complaints:boolean|null;
   particular_observations:string;observations:string;local_feedback:string;supervisor_feedback:string;
@@ -24,11 +25,11 @@ type Props={
 type Editor={location:LocationRow;evaluation?:RatingEvaluation};
 
 const criteria=[
-  ["rule_compliance","Respeta las reglas, políticas y normas de TIPTI"],
-  ["uniform_compliance","Mantiene el uniforme correcto, completo y limpio"],
-  ["ethics_compliance","Demuestra respeto y valores éticos con el equipo"],
-  ["punctuality_compliance","Cumple con puntualidad sus responsabilidades"],
-  ["no_team_complaints","No registra quejas relacionadas con el equipo TIPTI"]
+  ["rule_compliance","Cumplimiento horario de cajeros y apertura del local en el horario establecido"],
+  ["uniform_compliance","Apertura para corrección de inventarios (OOS)"],
+  ["ethics_compliance","Stock del Local (status de las perchas)"],
+  ["punctuality_compliance","Apertura a sacar productos de bodega"],
+  ["no_team_complaints","Trato del personal del local"]
 ] as const;
 
 function moveDate(value:string,days:number){
@@ -52,6 +53,19 @@ function timeLabel(value:string){
 function criterionLabel(value:boolean|null){return value===true?"Cumple":value===false?"No cumple":"No aplica";}
 function semaphoreLabel(value:RatingResult["semaphore"]){return value==="green"?"Verde":value==="yellow"?"Amarillo":"Rojo";}
 function safeName(value:string){return value.normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/gi,"_").replace(/^_|_$/g,"");}
+function compactDate(value:string|null){
+  if(!value)return "";
+  const [year,month,day]=value.split("-").map(Number);
+  const months=["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+  return `${day}${months[month-1]||""}`;
+}
+function visitFrequency(visitDate:string,nextVisitDate:string|null){
+  if(!nextVisitDate)return "";
+  const start=new Date(`${visitDate}T12:00:00Z`).getTime(),end=new Date(`${nextVisitDate}T12:00:00Z`).getTime();
+  const days=Math.round((end-start)/86400000);
+  return `${days} ${days===1?"día":"días"}`;
+}
+function numericCriterion(value:boolean|null){return value===true?1:value===false?0:"N/A";}
 
 function decorateSheet(sheet:XLSX.WorkSheet,widths:number[]){
   sheet["!cols"]=widths.map(wch=>({wch}));
@@ -100,6 +114,37 @@ function evaluationSheet(evaluation:RatingEvaluation,includeResult:boolean){
   const sheet=XLSX.utils.aoa_to_sheet(rows);
   decorateSheet(sheet,[42,34,24,34]);
   sheet["!merges"]=[XLSX.utils.decode_range("A1:D1")];
+  return sheet;
+}
+
+function supervisorReportSheet(evaluation:RatingEvaluation){
+  const rows:(string|number)[][]=[
+    ["FECHA DE\nVISITA","PROXIM\nA\nVISITA","LOCAL","ADMINISTRADO\nR","TELÉFONO","PERIODICI\nDAD DE\nVISITA","CHECK LIST","CALIFICA\nCIÓN","OBSERVACIONES","Supervisor","Feedback Supervisor"],
+    [compactDate(evaluation.visit_date),compactDate(evaluation.next_visit_date),evaluation.location_name,evaluation.administrator_name,evaluation.administrator_phone,visitFrequency(evaluation.visit_date,evaluation.next_visit_date),`1. ${criteria[0][1]}`,numericCriterion(evaluation.rule_compliance),evaluation.observations,evaluation.submitted_by_name,evaluation.supervisor_feedback],
+    ["","","","","","",`2. ${criteria[1][1]}`,numericCriterion(evaluation.uniform_compliance),"","",""],
+    ["","","","","","",`3. ${criteria[2][1]}`,numericCriterion(evaluation.ethics_compliance),"","",""],
+    ["","","","","","",`4. ${criteria[3][1]}`,numericCriterion(evaluation.punctuality_compliance),"","",""],
+    ["","","","","","",`5. ${criteria[4][1]}`,numericCriterion(evaluation.no_team_complaints),"","",""]
+  ];
+  const sheet=XLSX.utils.aoa_to_sheet(rows);
+  sheet["!cols"]=[82,61,63,109,99,74,299,66,316,100,253].map(wpx=>({wpx}));
+  sheet["!rows"]=[{hpt:33},{hpt:11.25},{hpt:11.25},{hpt:12},{hpt:46.5},{hpt:12}];
+  sheet["!merges"]=["A2:A6","B2:B6","C2:C6","D2:D6","E2:E6","F2:F6","I2:I6","J2:J6","K2:K6"].map(XLSX.utils.decode_range);
+  const black={rgb:"000000"},thin={style:"thin",color:black};
+  const whiteFill={patternType:"solid",fgColor:{rgb:"FFFFFF"},bgColor:{rgb:"FFFFFF"}};
+  const headerStyle={font:{name:"Calibri",sz:11,bold:true,color:black},fill:whiteFill,alignment:{horizontal:"center",vertical:"center",wrapText:true},border:{top:thin,bottom:thin,left:thin,right:thin}};
+  const centerStyle={font:{name:"Calibri",sz:9,color:black},fill:whiteFill,alignment:{horizontal:"center",vertical:"center",wrapText:true},border:{top:thin,bottom:thin,left:thin,right:thin}};
+  const checklistStyle={font:{name:"Calibri",sz:9,color:black},fill:whiteFill,alignment:{horizontal:"left",vertical:"center",wrapText:false},border:{top:thin,bottom:thin,left:thin,right:thin}};
+  for(let column=0;column<11;column++)sheet[XLSX.utils.encode_cell({r:0,c:column})].s=headerStyle;
+  for(let row=1;row<=5;row++){
+    for(let column=0;column<11;column++){
+      const cell=sheet[XLSX.utils.encode_cell({r:row,c:column})];
+      if(cell)cell.s=column===6?checklistStyle:centerStyle;
+    }
+  }
+  sheet.E2.s={...centerStyle,numFmt:"@"};
+  sheet["!pageSetup"]={orientation:"landscape",fitToWidth:1,fitToHeight:1,paperSize:9};
+  sheet["!margins"]={left:0.2,right:0.2,top:0.3,bottom:0.3,header:0,footer:0};
   return sheet;
 }
 
@@ -152,6 +197,7 @@ export default function AdministratorRatings({locations,currentUser,apiFetch,set
       locationId:editor.location.id,weekStart,
       visitDate:form.get("visitDate"),nextVisitDate:form.get("nextVisitDate"),
       administratorName:form.get("administratorName"),administratorPosition:form.get("administratorPosition"),administratorPhone:form.get("administratorPhone"),
+      metricsSocialized:form.get("metricsSocialized"),
       particularObservations:form.get("particularObservations"),observations:form.get("observations"),
       localFeedback:form.get("localFeedback"),supervisorFeedback:form.get("supervisorFeedback")
     };
@@ -168,7 +214,7 @@ export default function AdministratorRatings({locations,currentUser,apiFetch,set
 
   async function downloadSupervisorReport(evaluation:RatingEvaluation){
     const workbook=XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook,evaluationSheet(evaluation,false),"Evaluacion");
+    XLSX.utils.book_append_sheet(workbook,supervisorReportSheet(evaluation),"Calificación");
     try{
       await downloadWorkbook(workbook,`Evaluacion_Administrador_${safeName(evaluation.location_name)}_${evaluation.week_start}.xlsx`,"Reporte de evaluación");
       setNotice("✓ Reporte de entrega generado");
@@ -246,7 +292,7 @@ export default function AdministratorRatings({locations,currentUser,apiFetch,set
     {editor&&<div className="modal-backdrop" onMouseDown={()=>!saving&&setEditor(null)}><form className="modal rating-form" onSubmit={event=>{event.preventDefault();void saveEvaluation(new FormData(event.currentTarget));}} onMouseDown={event=>event.stopPropagation()}>
       <button type="button" className="close" disabled={saving} onClick={()=>setEditor(null)}>×</button>
       <span className="modal-kicker">SEMANA {weekStart}</span><h2>{editor.location.name}</h2><p>Completa el checklist. La calificación calculada será visible únicamente para el administrador.</p>
-      <div className="rating-form-grid"><label>Fecha de visita<input name="visitDate" type="date" min={weekStart} max={weekEnd} required defaultValue={editor.evaluation?.visit_date||(today>=weekStart&&today<=weekEnd?today:weekStart)}/></label><label>Próxima visita<input name="nextVisitDate" type="date" min={editor.evaluation?.visit_date||weekStart} defaultValue={editor.evaluation?.next_visit_date||""}/></label><label>Persona evaluada<input name="administratorName" required defaultValue={editor.evaluation?.administrator_name||""}/></label><label>Puesto o función<input name="administratorPosition" required placeholder="Ej. Administrador, encargado o jefe de local" defaultValue={editor.evaluation?.administrator_position||""}/></label><label>Teléfono<input name="administratorPhone" defaultValue={editor.evaluation?.administrator_phone||""}/></label></div>
+      <div className="rating-form-grid"><label>Fecha de visita<input name="visitDate" type="date" min={weekStart} max={weekEnd} required defaultValue={editor.evaluation?.visit_date||(today>=weekStart&&today<=weekEnd?today:weekStart)}/></label><label>Próxima visita<input name="nextVisitDate" type="date" min={editor.evaluation?.visit_date||weekStart} defaultValue={editor.evaluation?.next_visit_date||""}/></label><label>Persona evaluada<input name="administratorName" required defaultValue={editor.evaluation?.administrator_name||""}/></label><label>Puesto o función<input name="administratorPosition" required placeholder="Ej. Administrador, encargado o jefe de local" defaultValue={editor.evaluation?.administrator_position||""}/></label><label>Teléfono<input name="administratorPhone" defaultValue={editor.evaluation?.administrator_phone||""}/></label><label>¿Se socializaron métricas con el administrador?<select name="metricsSocialized" required defaultValue={editor.evaluation?editor.evaluation.metrics_socialized?"true":"false":""}><option value="" disabled>Selecciona</option><option value="true">Sí</option><option value="false">No</option></select></label></div>
       <fieldset className="rating-checklist"><legend>Checklist de evaluación</legend>{criteria.map(([key,label])=><label key={key}><span>{label}</span><select name={key} required defaultValue={editor.evaluation?editor.evaluation[key]===true?"true":editor.evaluation[key]===false?"false":"na":""}><option value="" disabled>Selecciona</option><option value="true">Cumple</option><option value="false">No cumple</option><option value="na">No aplica</option></select></label>)}</fieldset>
       <label>Observaciones particulares<textarea name="particularObservations" rows={2} defaultValue={editor.evaluation?.particular_observations||""}/></label>
       <label>Observaciones<textarea name="observations" rows={2} defaultValue={editor.evaluation?.observations||""}/></label>
@@ -259,7 +305,7 @@ export default function AdministratorRatings({locations,currentUser,apiFetch,set
       <button type="button" className="close" onClick={()=>setDetail(null)}>×</button><span className="modal-kicker">RESULTADO PRIVADO</span><h2>{detail.location_name}</h2><p>{detail.administrator_name} · {detail.administrator_position} · Semana {detail.week_start}</p>
       {detail.result&&<div className={`rating-detail-score ${detail.result.semaphore}`}><strong>{detail.result.score}%</strong><span>{semaphoreLabel(detail.result.semaphore)} · {detail.result.compliant_count} de {detail.result.applicable_count} criterios</span></div>}
       <div className="rating-detail-list">{criteria.map(([key,label])=><div key={key}><span>{label}</span><strong className={detail[key]===true?"yes":detail[key]===false?"no":"na"}>{criterionLabel(detail[key])}</strong></div>)}</div>
-      <div className="rating-detail-notes"><p><strong>Observaciones particulares</strong>{detail.particular_observations||"Sin observaciones"}</p><p><strong>Observaciones</strong>{detail.observations||"Sin observaciones"}</p><p><strong>Feedback local</strong>{detail.local_feedback||"Sin feedback"}</p><p><strong>Feedback supervisor</strong>{detail.supervisor_feedback||"Sin feedback"}</p></div>
+      <div className="rating-detail-notes"><p><strong>Métricas socializadas</strong>{detail.metrics_socialized?"Sí":"No"}</p><p><strong>Observaciones particulares</strong>{detail.particular_observations||"Sin observaciones"}</p><p><strong>Observaciones</strong>{detail.observations||"Sin observaciones"}</p><p><strong>Feedback local</strong>{detail.local_feedback||"Sin feedback"}</p><p><strong>Feedback supervisor</strong>{detail.supervisor_feedback||"Sin feedback"}</p></div>
       <div className="rating-audit"><strong>{detail.submitted_by_name}</strong><span>{detail.submitted_by_email} · {timeLabel(detail.submitted_at)}</span></div>
     </div></div>}
   </section>;
