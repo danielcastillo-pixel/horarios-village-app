@@ -189,6 +189,10 @@ export default function Home() {
   const [uiStateReady,setUiStateReady]=useState(false);
   const [fillDrag,setFillDrag]=useState<FillDrag|null>(null);
   const fillDragRef=useRef<FillDrag|null>(null);
+  const shopperLoadRequestRef=useRef(0);
+  const shopperMutationVersionRef=useRef(0);
+  const shopperMutationBusyRef=useRef(false);
+  const [,setShopperMutationBusy]=useState(false);
 
   const dateKeys = useMemo(() => Array.from({length:7},(_,i) => {
     const d = new Date(`${weekStart}T12:00:00`);
@@ -469,8 +473,27 @@ export default function Home() {
   function beginFillDrag(kind:FillKind,sourceIndex:number,day:number,event:ReactPointerEvent<HTMLButtonElement>){
     event.preventDefault();
     event.stopPropagation();
+    if(kind==="shopper"&&shopperMutationBusyRef.current){
+      setNotice("Espera a que termine de guardarse el turno actual");
+      return;
+    }
     event.currentTarget.setPointerCapture(event.pointerId);
     setActiveFillDrag({kind,sourceIndex,targetIndex:sourceIndex,day,pointerId:event.pointerId});
+  }
+
+  function beginShopperMutation(){
+    if(shopperMutationBusyRef.current){
+      setNotice("Espera a que termine de guardarse el turno actual");
+      return null;
+    }
+    shopperMutationBusyRef.current=true;
+    setShopperMutationBusy(true);
+    return ++shopperMutationVersionRef.current;
+  }
+
+  function endShopperMutation(){
+    shopperMutationBusyRef.current=false;
+    setShopperMutationBusy(false);
   }
 
   function moveFillDrag(event:ReactPointerEvent<HTMLButtonElement>){
@@ -527,6 +550,8 @@ export default function Home() {
     if(!source||!turnCode||!targets.length)return;
     const overwriteCount=targets.filter(staff=>shopperTurns.some(turn=>turn.staff_id===staff.id&&turn.work_date===workDate)).length;
     if(overwriteCount&&!window.confirm(`Se reemplazarán ${overwriteCount} turno${overwriteCount===1?"":"s"} existente${overwriteCount===1?"":"s"}. ¿Continuar?`))return;
+    const mutationVersion=beginShopperMutation();
+    if(mutationVersion===null)return;
     const targetIds=new Set(targets.map(staff=>staff.id));
     setShopperTurns(current=>{
       const next=current.map(turn=>targetIds.has(turn.staff_id)&&turn.work_date===workDate?{...turn,turn_code:turnCode}:turn);
@@ -535,13 +560,18 @@ export default function Home() {
       return next;
     });
     setNotice(`Copiando turno a ${targets.length} shopper${targets.length===1?"":"s"}…`);
-    const response=await apiFetch("/api/shoppers",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
-      action:"fillTurns",staffIds:targets.map(staff=>staff.id),workDate,turnCode
-    })});
-    const result=await response.json().catch(()=>({error:"No se pudo copiar el turno"})) as {copied?:number;error?:string};
-    if(!response.ok){setNotice(`Error: ${result.error??"No se pudo copiar el turno"}`);await loadShoppers();return;}
-    setNotice(`✓ Turno ${turnCode} copiado hacia abajo en ${result.copied??targets.length} fila${targets.length===1?"":"s"}`);
-    await loadShoppers();
+    try{
+      const response=await apiFetch("/api/shoppers",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
+        action:"fillTurns",staffIds:targets.map(staff=>staff.id),workDate,turnCode
+      })});
+      const result=await response.json().catch(()=>({error:"No se pudo copiar el turno"})) as {copied?:number;error?:string};
+      if(mutationVersion!==shopperMutationVersionRef.current)return;
+      if(!response.ok)setNotice(`Error: ${result.error??"No se pudo copiar el turno"}`);
+      else setNotice(`✓ Turno ${turnCode} copiado hacia abajo en ${result.copied??targets.length} fila${targets.length===1?"":"s"}`);
+      await loadShoppers();
+    }finally{
+      endShopperMutation();
+    }
   }
 
   async function endFillDrag(event:ReactPointerEvent<HTMLButtonElement>){
@@ -730,11 +760,14 @@ export default function Home() {
   }
 
   async function loadShoppers(){
+    const requestId=++shopperLoadRequestRef.current;
+    const mutationVersion=shopperMutationVersionRef.current;
     const categories:("purchase"|"delivery")[]=active==="Panel general"?["purchase","delivery"]:[shopperCategory];
     const responses=await Promise.all(categories.map(category=>apiFetch(`/api/shoppers?category=${category}`)));
     const failed=responses.find(response=>!response.ok);
-    if(failed){const p=await failed.json().catch(()=>({error:"No disponible"}));setNotice(`Error: ${p.error}`);return;}
+    if(failed){const p=await failed.json().catch(()=>({error:"No disponible"}));if(requestId===shopperLoadRequestRef.current&&mutationVersion===shopperMutationVersionRef.current)setNotice(`Error: ${p.error}`);return;}
     const payloads=await Promise.all(responses.map(response=>response.json() as Promise<{staff:ShopperRow[];turns:ShopperTurnRow[];shiftTypes:ShopperShiftType[]}>));
+    if(requestId!==shopperLoadRequestRef.current||mutationVersion!==shopperMutationVersionRef.current)return;
     const uniqueById=<T extends {id:number}>(rows:T[])=>[...new Map(rows.map(row=>[row.id,row])).values()];
     setShopperStaff(uniqueById(payloads.flatMap(payload=>payload.staff)));
     setShopperTurns(uniqueById(payloads.flatMap(payload=>payload.turns)));
@@ -823,12 +856,29 @@ export default function Home() {
 
   async function saveShopperTurn(code:string){
     if(!shopperModal)return;
-    const response=await apiFetch("/api/shoppers",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
-      action:"saveTurn",staffId:shopperModal.staff.id,workDate:shopperModal.date,turnCode:code
-    })});
-    const result=await response.json().catch(()=>({error:"No se pudo guardar"}));
-    if(!response.ok){setNotice(`Error: ${result.error}`);return;}
-    setShopperModal(null);setNotice("✓ Turno guardado");await loadShoppers();
+    const mutationVersion=beginShopperMutation();
+    if(mutationVersion===null)return;
+    const selected={...shopperModal};
+    setShopperTurns(current=>{
+      const existing=current.find(turn=>turn.staff_id===selected.staff.id&&turn.work_date===selected.date);
+      return existing
+        ?current.map(turn=>turn.id===existing.id?{...turn,turn_code:code}:turn)
+        :[...current,{id:-Date.now(),staff_id:selected.staff.id,work_date:selected.date,turn_code:code}];
+    });
+    setShopperModal(null);
+    setNotice("Guardando turno…");
+    try{
+      const response=await apiFetch("/api/shoppers",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
+        action:"saveTurn",staffId:selected.staff.id,workDate:selected.date,turnCode:code
+      })});
+      const result=await response.json().catch(()=>({error:"No se pudo guardar"}));
+      if(mutationVersion!==shopperMutationVersionRef.current)return;
+      if(!response.ok)setNotice(`Error: ${result.error}`);
+      else setNotice("✓ Turno guardado");
+      await loadShoppers();
+    }finally{
+      endShopperMutation();
+    }
   }
 
   function openShopperTurnModal(staff:ShopperRow,date:string){
