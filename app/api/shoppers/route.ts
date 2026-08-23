@@ -106,8 +106,12 @@ export async function POST(request:NextRequest){
     const {data:shiftTypes,error:shiftError}=await db.from("shopper_shift_types").select("id").eq("code",turnCode).eq("active",true).or(`category.eq.${staff.category},category.eq.both`).or(`location_id.eq.${staff.location_id},location_id.is.null`).limit(1);
     if(shiftError)return NextResponse.json({error:databaseError(shiftError,"No se pudo validar el turno")},{status:400});
     if(!shiftTypes?.length)return NextResponse.json({error:`El turno ${turnCode} no está disponible para este shopper y local`},{status:400});
-    const {error}=await db.from("shopper_turns").upsert({staff_id:staffId,work_date:String(body.workDate),turn_code:turnCode,updated_at:new Date().toISOString()},{onConflict:"staff_id,work_date"});
+    const {data:savedTurn,error}=await db.from("shopper_turns")
+      .upsert({staff_id:staffId,work_date:String(body.workDate),turn_code:turnCode,updated_at:new Date().toISOString()},{onConflict:"staff_id,work_date"})
+      .select("id,staff_id,work_date,turn_code")
+      .single();
     if(error)return NextResponse.json({error:databaseError(error,"No se pudo guardar el turno")},{status:400});
+    return NextResponse.json({ok:true,turn:savedTurn});
   }else if(body.action==="fillTurns"){
     const staffIds=[...new Set((Array.isArray(body.staffIds)?body.staffIds:[]).map(Number).filter(Number.isFinite))];
     const workDate=String(body.workDate||""),turnCode=String(body.turnCode||"").trim().toUpperCase();
