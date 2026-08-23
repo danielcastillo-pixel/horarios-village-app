@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { supabase } from "@/lib/supabase";
 import { toPng } from "html-to-image";
 import * as XLSX from "xlsx-js-style";
@@ -23,6 +23,8 @@ type ShopperTurnRow={id:number;staff_id:number;work_date:string;turn_code:string
 type ShopperShiftType={id:number;code:string;label:string;start_time:string|null;end_time:string|null;category:"purchase"|"delivery"|"both";location_id:number|null;counts_opening:boolean;counts_closing:boolean;is_free:boolean};
 type PresenceType="supervisor"|"purchase"|"delivery";
 type PresenceRow={key:string;name:string;initials:string;kind:PresenceType;role:string;start:string;end:string;active:boolean;minutesUntil:number};
+type FillKind="supervisor"|"shopper";
+type FillDrag={kind:FillKind;sourceIndex:number;targetIndex:number;day:number;pointerId:number};
 
 const locations = [
   "Todos los locales", "MX. Village Plaza", "SX. Plaza Batán", "SX. Villa Club",
@@ -185,6 +187,8 @@ export default function Home() {
   const [presenceTypes,setPresenceTypes]=useState<PresenceType[]>(["supervisor","purchase","delivery"]);
   const [presenceSearched,setPresenceSearched]=useState(false);
   const [uiStateReady,setUiStateReady]=useState(false);
+  const [fillDrag,setFillDrag]=useState<FillDrag|null>(null);
+  const fillDragRef=useRef<FillDrag|null>(null);
 
   const dateKeys = useMemo(() => Array.from({length:7},(_,i) => {
     const d = new Date(`${weekStart}T12:00:00`);
@@ -457,6 +461,107 @@ export default function Home() {
     setModal(null);
   }
 
+  function setActiveFillDrag(next:FillDrag|null){
+    fillDragRef.current=next;
+    setFillDrag(next);
+  }
+
+  function beginFillDrag(kind:FillKind,sourceIndex:number,day:number,event:ReactPointerEvent<HTMLButtonElement>){
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setActiveFillDrag({kind,sourceIndex,targetIndex:sourceIndex,day,pointerId:event.pointerId});
+  }
+
+  function moveFillDrag(event:ReactPointerEvent<HTMLButtonElement>){
+    const current=fillDragRef.current;
+    if(!current||current.pointerId!==event.pointerId)return;
+    event.preventDefault();
+    if(event.clientY>window.innerHeight-70)window.scrollBy({top:28,behavior:"auto"});
+    else if(event.clientY<70)window.scrollBy({top:-28,behavior:"auto"});
+    const element=document.elementFromPoint(event.clientX,event.clientY);
+    const cell=element?.closest<HTMLElement>(`td[data-fill-kind="${current.kind}"][data-fill-day="${current.day}"]`);
+    const targetIndex=Number(cell?.dataset.fillRow);
+    if(!Number.isInteger(targetIndex)||targetIndex<current.sourceIndex||targetIndex===current.targetIndex)return;
+    setActiveFillDrag({...current,targetIndex});
+  }
+
+  function fillCellClass(kind:FillKind,row:number,day:number){
+    if(!fillDrag||fillDrag.kind!==kind||fillDrag.day!==day)return "";
+    if(row===fillDrag.sourceIndex)return " fill-source";
+    return row>fillDrag.sourceIndex&&row<=fillDrag.targetIndex?" fill-target":"";
+  }
+
+  async function fillSupervisorDown(drag:FillDrag){
+    const source=filtered[drag.sourceIndex];
+    const sourceShift=source?.shifts[drag.day];
+    const targets=filtered.slice(drag.sourceIndex+1,drag.targetIndex+1);
+    if(!source||!sourceShift||!targets.length)return;
+    const overwriteCount=targets.filter(person=>Boolean(person.shifts[drag.day])).length;
+    if(overwriteCount&&!window.confirm(`Se reemplazarán ${overwriteCount} turno${overwriteCount===1?"":"s"} existente${overwriteCount===1?"":"s"}. ¿Continuar?`))return;
+    const roleRow=data?.roles.find(role=>role.name===sourceShift.role);
+    if(!roleRow){setNotice("Error: no se encontró el rol del turno que quieres copiar");return;}
+    const free=["Libre","Descanso","Vacaciones"].includes(sourceShift.role);
+    const times=sourceShift.time.match(/\d{2}:\d{2}/g)??[];
+    const copiedShift={...sourceShift};
+    setPeople(current=>current.map(person=>targets.some(target=>target.id===person.id)
+      ?{...person,shifts:person.shifts.map((item,index)=>index===drag.day?copiedShift:item)}
+      :person));
+    setNotice(`Copiando turno a ${targets.length} supervisor${targets.length===1?"":"es"}…`);
+    const response=await apiFetch("/api/data",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
+      action:"fillAssignments",
+      assignments:targets.map(person=>({supervisorId:person.id,workDate:dateKeys[drag.day],start:free?null:times[0],end:free?null:times[1],roleId:roleRow.id}))
+    })});
+    const result=await response.json().catch(()=>({error:"No se pudo copiar el turno"})) as {copied?:number;error?:string};
+    if(!response.ok){setNotice(`Error: ${result.error??"No se pudo copiar el turno"}`);await loadData();return;}
+    setNotice(`✓ Turno copiado hacia abajo en ${result.copied??targets.length} fila${targets.length===1?"":"s"}`);
+    await loadData();
+  }
+
+  async function fillShopperDown(drag:FillDrag){
+    const visible=shopperStaff.filter(staff=>location==="Todos los locales"||staff.location_name===location);
+    const source=visible[drag.sourceIndex];
+    const targets=visible.slice(drag.sourceIndex+1,drag.targetIndex+1);
+    const workDate=dateKeys[drag.day];
+    const turnCode=shopperTurns.find(turn=>turn.staff_id===source?.id&&turn.work_date===workDate)?.turn_code;
+    if(!source||!turnCode||!targets.length)return;
+    const overwriteCount=targets.filter(staff=>shopperTurns.some(turn=>turn.staff_id===staff.id&&turn.work_date===workDate)).length;
+    if(overwriteCount&&!window.confirm(`Se reemplazarán ${overwriteCount} turno${overwriteCount===1?"":"s"} existente${overwriteCount===1?"":"s"}. ¿Continuar?`))return;
+    const targetIds=new Set(targets.map(staff=>staff.id));
+    setShopperTurns(current=>{
+      const next=current.map(turn=>targetIds.has(turn.staff_id)&&turn.work_date===workDate?{...turn,turn_code:turnCode}:turn);
+      const existing=new Set(next.filter(turn=>turn.work_date===workDate).map(turn=>turn.staff_id));
+      targets.forEach((staff,index)=>{if(!existing.has(staff.id))next.push({id:-(Date.now()+index),staff_id:staff.id,work_date:workDate,turn_code:turnCode});});
+      return next;
+    });
+    setNotice(`Copiando turno a ${targets.length} shopper${targets.length===1?"":"s"}…`);
+    const response=await apiFetch("/api/shoppers",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
+      action:"fillTurns",staffIds:targets.map(staff=>staff.id),workDate,turnCode
+    })});
+    const result=await response.json().catch(()=>({error:"No se pudo copiar el turno"})) as {copied?:number;error?:string};
+    if(!response.ok){setNotice(`Error: ${result.error??"No se pudo copiar el turno"}`);await loadShoppers();return;}
+    setNotice(`✓ Turno ${turnCode} copiado hacia abajo en ${result.copied??targets.length} fila${targets.length===1?"":"s"}`);
+    await loadShoppers();
+  }
+
+  async function endFillDrag(event:ReactPointerEvent<HTMLButtonElement>){
+    const current=fillDragRef.current;
+    if(!current||current.pointerId!==event.pointerId)return;
+    event.preventDefault();
+    event.stopPropagation();
+    setActiveFillDrag(null);
+    if(current.targetIndex===current.sourceIndex){
+      setNotice("Mantén presionado el cuadro naranja y arrástralo hacia abajo para copiar el turno");
+      return;
+    }
+    if(current.kind==="supervisor")await fillSupervisorDown(current);
+    else await fillShopperDown(current);
+  }
+
+  function cancelFillDrag(event:ReactPointerEvent<HTMLButtonElement>){
+    if(fillDragRef.current?.pointerId===event.pointerId)setActiveFillDrag(null);
+  }
+
   async function copyWeek() {
     const selectedLocation=data?.locations.find(l=>l.name===location);
     if(!selectedLocation){setNotice("Selecciona un local antes de copiar la semana");return;}
@@ -492,7 +597,7 @@ export default function Home() {
       const dataUrl=await toPng(node,{
         cacheBust:true,pixelRatio:2,backgroundColor:"#ffffff",
         width:node.scrollWidth,height:node.scrollHeight,
-        filter:element=>!(element instanceof HTMLElement&&element.classList.contains("schedule-actions"))
+        filter:element=>!(element instanceof HTMLElement&&(element.classList.contains("schedule-actions")||element.classList.contains("fill-handle")||element.classList.contains("fill-help")))
       });
       const filename=`Horario_${location.replace(/[^a-z0-9]+/gi,"_")}_${weekStart}.png`;
       const blob=await fetch(dataUrl).then(response=>response.blob());
@@ -979,7 +1084,7 @@ export default function Home() {
         </section>}
 
         {active === "Horarios" && <section className="schedule-card" ref={scheduleRef}>
-          <div className="schedule-title"><div><h2>Horario semanal</h2><p>Puedes editar nombres, quitar filas y modificar los turnos de tus locales asignados. Las semanas anteriores conservan su historial.</p></div><div className="schedule-actions"><button className="schedule-action-button publish-action" onClick={()=>void publishWeeklyActivity("supervisor_schedule")}>✓ Publicar semana</button><button className="schedule-action-button" onClick={() => setCreate("supervisor")}>＋ Agregar supervisor</button><button className="schedule-action-button" onClick={()=>void copyWeek()}>▣ Copiar semana</button><button className="schedule-action-button image-action" onClick={()=>void downloadScheduleImage()}>▧ Descargar imagen</button></div></div>
+          <div className="schedule-title"><div><h2>Horario semanal</h2><p>Puedes editar nombres, quitar filas y modificar los turnos de tus locales asignados. Las semanas anteriores conservan su historial.</p><span className="fill-help"><i /> Arrastra el cuadro naranja de un turno hacia abajo para copiarlo.</span></div><div className="schedule-actions"><button className="schedule-action-button publish-action" onClick={()=>void publishWeeklyActivity("supervisor_schedule")}>✓ Publicar semana</button><button className="schedule-action-button" onClick={() => setCreate("supervisor")}>＋ Agregar supervisor</button><button className="schedule-action-button" onClick={()=>void copyWeek()}>▣ Copiar semana</button><button className="schedule-action-button image-action" onClick={()=>void downloadScheduleImage()}>▧ Descargar imagen</button></div></div>
           <div className="toolbar">
             <div className="week"><button aria-label="Semana anterior" onClick={() => changeWeek(-1)}>‹</button><strong>{weekLabel}</strong><button aria-label="Semana siguiente" onClick={() => changeWeek(1)}>›</button></div>
             <select value={location} onChange={e => setLocation(e.target.value)}>{isAdmin && <option>Todos los locales</option>}{(data?.locations.map(l => l.name) ?? locations.slice(1)).map(l => <option key={l}>{l}</option>)}</select>
@@ -987,9 +1092,9 @@ export default function Home() {
           </div>
           <div className="table-wrap"><table>
             <thead><tr><th>Supervisor</th>{days.map(d => <th key={d}>{d}</th>)}<th>Horas</th></tr></thead>
-            <tbody>{filtered.map(person => <tr key={person.id}>
+            <tbody>{filtered.map((person,rowIndex) => <tr key={person.id}>
               <td><div className="person"><span className="avatar">{person.initials}</span><div className="person-info"><button className="person-name" onClick={() => openSupervisorEditor(person)}>{person.name} <span>✎</span></button><small>{person.location}</small></div><button className="remove-row" aria-label={`Quitar fila de ${person.name}`} title="Quitar desde esta semana" onClick={() => void removeSupervisorRow(person)}>×</button></div></td>
-              {person.shifts.map((item, day) => <td key={day}><button className={`shift ${item?.tone ?? "empty"}`} onClick={() => setModal({person,day})}>{item ? <><strong>{item.time}</strong><span>{item.role}</span></> : <><strong>＋ Agregar</strong><span>turno</span></>}</button></td>)}
+              {person.shifts.map((item, day) => <td key={day} data-fill-kind="supervisor" data-fill-row={rowIndex} data-fill-day={day}><div className={`fillable-cell${fillCellClass("supervisor",rowIndex,day)}`}><button className={`shift ${item?.tone ?? "empty"}`} onClick={() => setModal({person,day})}>{item ? <><strong>{item.time}</strong><span>{item.role}</span></> : <><strong>＋ Agregar</strong><span>turno</span></>}</button>{item&&<button type="button" className="fill-handle" aria-label={`Copiar el turno de ${person.name} hacia abajo`} title="Arrastra hacia abajo para copiar" onClick={event=>event.stopPropagation()} onPointerDown={event=>beginFillDrag("supervisor",rowIndex,day,event)} onPointerMove={moveFillDrag} onPointerUp={event=>void endFillDrag(event)} onPointerCancel={cancelFillDrag} />}</div></td>)}
               <td className="hours">{displayHours(hoursFor(person))} h</td>
             </tr>)}</tbody>
           </table></div>
@@ -998,7 +1103,7 @@ export default function Home() {
         {active==="Shoppers"&&<section className="schedule-card shopper-schedule" ref={shopperScheduleRef}>
           <div className="shopper-view-tabs"><button className={shopperView==="schedule"?"active":""} onClick={()=>setShopperView("schedule")}><i>▦</i><span><strong>Horarios</strong><small>Programación semanal</small></span></button><button className={shopperView==="directory"?"active":""} onClick={()=>setShopperView("directory")}><i>⌕</i><span><strong>Repositorio de shoppers</strong><small>Buscar IDs y cambiar locales</small></span></button></div>
           {shopperView==="schedule"?<>
-          <div className="schedule-title"><div><h2>Horario de shoppers</h2><p>Programación por turnos del personal de tus locales asignados.</p></div><div className="schedule-actions shopper-actions"><button className="schedule-action-button publish-action" onClick={()=>void publishWeeklyActivity(shopperCategory==="purchase"?"shopper_purchase":"shopper_delivery")}>✓ Publicar {shopperCategory==="purchase"?"compra":"entrega"}</button><button className="schedule-action-button" onClick={()=>setAddShopper(true)}>＋ Agregar shopper</button><button className="schedule-action-button" onClick={()=>setAddShopperShift(true)}>＋ Crear turno</button><button className="schedule-action-button" onClick={()=>void copyShopperWeek()}>▣ Copiar semana</button><button className="schedule-action-button image-action" onClick={()=>setShopperImageChoice(true)}>▧ Descargar imagen</button></div></div>
+          <div className="schedule-title"><div><h2>Horario de shoppers</h2><p>Programación por turnos del personal de tus locales asignados.</p><span className="fill-help"><i /> Arrastra el cuadro naranja de un turno hacia abajo para copiarlo.</span></div><div className="schedule-actions shopper-actions"><button className="schedule-action-button publish-action" onClick={()=>void publishWeeklyActivity(shopperCategory==="purchase"?"shopper_purchase":"shopper_delivery")}>✓ Publicar {shopperCategory==="purchase"?"compra":"entrega"}</button><button className="schedule-action-button" onClick={()=>setAddShopper(true)}>＋ Agregar shopper</button><button className="schedule-action-button" onClick={()=>setAddShopperShift(true)}>＋ Crear turno</button><button className="schedule-action-button" onClick={()=>void copyShopperWeek()}>▣ Copiar semana</button><button className="schedule-action-button image-action" onClick={()=>setShopperImageChoice(true)}>▧ Descargar imagen</button></div></div>
           <div className="shopper-submenu"><button className={shopperCategory==="purchase"?"active":""} onClick={()=>setShopperCategory("purchase")}>Asesores de compra</button><button className={shopperCategory==="delivery"?"active":""} onClick={()=>setShopperCategory("delivery")}>Repartidores</button></div>
           <div className="toolbar"><div className="week"><button onClick={()=>changeWeek(-1)}>‹</button><strong>{weekLabel}</strong><button onClick={()=>changeWeek(1)}>›</button></div><select value={location} onChange={e=>setLocation(e.target.value)}>{isAdmin&&<option>Todos los locales</option>}{data?.locations.map(l=><option key={l.id}>{l.name}</option>)}</select></div>
           {(()=>{
@@ -1010,7 +1115,7 @@ export default function Home() {
             });
             return <><div className="turn-kpis"><article><strong>{visible.length}</strong><span>Personal</span></article><article><strong>{types.filter(t=>t.counts_opening).length}</strong><span>Aperturas</span></article><article><strong>{types.filter(t=>!t.is_free&&!t.counts_opening&&!t.counts_closing).length}</strong><span>Intermedios</span></article><article><strong>{types.filter(t=>t.counts_closing).length}</strong><span>Cierres</span></article><article><strong>{types.filter(t=>t.is_free).length}</strong><span>Libres</span></article></div>
             <div className="daily-coverage"><div className="daily-coverage-head"><div><strong>Cobertura diaria</strong><span>Personal asignado por tipo de turno cada día</span></div><small>{shopperCategory==="purchase"?"Asesores de compra":"Repartidores"}</small></div><div className="daily-coverage-scroll">{daily.map(day=><article className="daily-card" key={day.date}><strong>{day.label}</strong><div><span>Apertura</span><b className="opening">{day.opening}</b></div><div><span>Intermedio</span><b className="intermediate">{day.intermediate}</b></div><div><span>Cierre</span><b className="closing">{day.closing}</b></div><div><span>Libre / Vac.</span><b className="free">{day.free}</b></div></article>)}</div></div>
-            <div className={`table-wrap shopper-scalable${visible.length>20?" shopper-table-compact":""}`}><table><thead><tr><th>{shopperCategory==="purchase"?"Asesor de compra":"Repartidor"}</th>{days.map(d=><th key={d}>{d}</th>)}<th>Aperturas</th><th>Cierres</th>{isAdmin&&<th>Horas</th>}</tr></thead><tbody>{visible.map(staff=>{const weekly=dateKeys.map(d=>shopperTurns.find(t=>t.staff_id===staff.id&&t.work_date===d)?.turn_code||"");const weeklyTypes=weekly.map(code=>shopperShiftFor(code,staff.location_id));const weeklyHours=weeklyTypes.reduce((total,type)=>total+shopperShiftHours(type),0);return <tr key={staff.id}><td><div className="person"><span className="avatar">{staff.name.split(" ").map(x=>x[0]).join("").slice(0,2)}</span><div className="person-info"><div className="shopper-name-line"><strong className="shopper-name-text">{staff.name}</strong><div className="shopper-row-actions"><button className="shopper-action edit" onClick={()=>setEditShopper(staff)} title={`Editar a ${staff.name}`} aria-label={`Editar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l11-11-4-4L4 16v4Zm12.2-16.2 4 4 1.1-1.1a1.4 1.4 0 0 0 0-2l-2-2a1.4 1.4 0 0 0-2 0l-1.1 1.1Z"/></svg></button><button className="shopper-action delete" onClick={()=>setDeleteShopper(staff)} title={`Eliminar a ${staff.name}`} aria-label={`Eliminar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8l1 2h4v2H3V5h4l1-2Zm-2 6h12l-1 12H7L6 9Zm4 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z"/></svg></button></div></div><small>{staff.employment_type} · {staff.location_name} <span className="shopper-inline-id">ID {staff.shopper_external_id||"—"}</span></small></div></div></td>{dateKeys.map((d,i)=><td key={d}><button className={`turn-code turn-${weekly[i]||"empty"}`} onClick={()=>openShopperTurnModal(staff,d)}>{weekly[i]||"＋"}</button></td>)}<td className="hours">{weeklyTypes.filter(t=>t?.counts_opening).length}</td><td className="hours">{weeklyTypes.filter(t=>t?.counts_closing).length}</td>{isAdmin&&<td className="hours shopper-hours">{displayHours(weeklyHours)} h</td>}</tr>})}</tbody></table></div></>
+            <div className={`table-wrap shopper-scalable${visible.length>20?" shopper-table-compact":""}`}><table><thead><tr><th>{shopperCategory==="purchase"?"Asesor de compra":"Repartidor"}</th>{days.map(d=><th key={d}>{d}</th>)}<th>Aperturas</th><th>Cierres</th>{isAdmin&&<th>Horas</th>}</tr></thead><tbody>{visible.map((staff,rowIndex)=>{const weekly=dateKeys.map(d=>shopperTurns.find(t=>t.staff_id===staff.id&&t.work_date===d)?.turn_code||"");const weeklyTypes=weekly.map(code=>shopperShiftFor(code,staff.location_id));const weeklyHours=weeklyTypes.reduce((total,type)=>total+shopperShiftHours(type),0);return <tr key={staff.id}><td><div className="person"><span className="avatar">{staff.name.split(" ").map(x=>x[0]).join("").slice(0,2)}</span><div className="person-info"><div className="shopper-name-line"><strong className="shopper-name-text">{staff.name}</strong><div className="shopper-row-actions"><button className="shopper-action edit" onClick={()=>setEditShopper(staff)} title={`Editar a ${staff.name}`} aria-label={`Editar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l11-11-4-4L4 16v4Zm12.2-16.2 4 4 1.1-1.1a1.4 1.4 0 0 0 0-2l-2-2a1.4 1.4 0 0 0-2 0l-1.1 1.1Z"/></svg></button><button className="shopper-action delete" onClick={()=>setDeleteShopper(staff)} title={`Eliminar a ${staff.name}`} aria-label={`Eliminar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8l1 2h4v2H3V5h4l1-2Zm-2 6h12l-1 12H7L6 9Zm4 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z"/></svg></button></div></div><small>{staff.employment_type} · {staff.location_name} <span className="shopper-inline-id">ID {staff.shopper_external_id||"—"}</span></small></div></div></td>{dateKeys.map((d,i)=><td key={d} data-fill-kind="shopper" data-fill-row={rowIndex} data-fill-day={i}><div className={`fillable-cell${fillCellClass("shopper",rowIndex,i)}`}><button className={`turn-code turn-${weekly[i]||"empty"}`} onClick={()=>openShopperTurnModal(staff,d)}>{weekly[i]||"＋"}</button>{weekly[i]&&<button type="button" className="fill-handle" aria-label={`Copiar el turno de ${staff.name} hacia abajo`} title="Arrastra hacia abajo para copiar" onClick={event=>event.stopPropagation()} onPointerDown={event=>beginFillDrag("shopper",rowIndex,i,event)} onPointerMove={moveFillDrag} onPointerUp={event=>void endFillDrag(event)} onPointerCancel={cancelFillDrag} />}</div></td>)}<td className="hours">{weeklyTypes.filter(t=>t?.counts_opening).length}</td><td className="hours">{weeklyTypes.filter(t=>t?.counts_closing).length}</td>{isAdmin&&<td className="hours shopper-hours">{displayHours(weeklyHours)} h</td>}</tr>})}</tbody></table></div></>
           })()}</>:<div className="shopper-directory">
             <div className="directory-heading"><div><h2>Repositorio de shoppers</h2><p>Busca por ID o nombre y administra el local asignado.</p></div><span>{shopperDirectory.length} registros</span></div>
             <label className="shopper-id-search"><span>⌕</span><input value={shopperDirectoryQuery} onChange={event=>setShopperDirectoryQuery(event.target.value)} placeholder="Buscar por ID de shopper o nombre…" /></label>
