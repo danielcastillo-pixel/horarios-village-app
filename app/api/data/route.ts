@@ -86,6 +86,21 @@ export async function POST(request:NextRequest) {
   if(body.action==="saveAssignment") result=await db.from("assignments").upsert({
     supervisor_id:body.supervisorId,work_date:body.workDate,start_time:body.start,end_time:body.end,role_id:body.roleId,updated_at:new Date().toISOString()
   },{onConflict:"supervisor_id,work_date"});
+  else if(body.action==="fillAssignments"){
+    const assignments=Array.isArray(body.assignments)?body.assignments:[];
+    if(!assignments.length||assignments.length>200)return NextResponse.json({error:"Selecciona entre 1 y 200 filas para copiar"},{status:400});
+    const rows=assignments.map((assignment:any)=>({
+      supervisor_id:Number(assignment.supervisorId),work_date:String(assignment.workDate||""),
+      start_time:assignment.start===null?null:String(assignment.start||""),end_time:assignment.end===null?null:String(assignment.end||""),
+      role_id:Number(assignment.roleId),updated_at:new Date().toISOString()
+    }));
+    const invalid=rows.some((row:any)=>!Number.isFinite(row.supervisor_id)||!Number.isFinite(row.role_id)||!isDate(row.work_date)
+      ||(row.start_time!==null&&!/^\d{2}:\d{2}$/.test(row.start_time))||(row.end_time!==null&&!/^\d{2}:\d{2}$/.test(row.end_time)));
+    if(invalid)return NextResponse.json({error:"Uno de los turnos seleccionados no es válido"},{status:400});
+    result=await db.from("assignments").upsert(rows,{onConflict:"supervisor_id,work_date"});
+    if(result.error)return NextResponse.json({error:result.error.message},{status:400});
+    return NextResponse.json({ok:true,copied:rows.length});
+  }
   else if(body.action==="addLocation") result=await db.from("locations").insert({name:String(body.name).trim(),city:String(body.city).trim()});
   else if(body.action==="addSupervisor"){
     const activeFrom=isDate(body.weekStart)?String(body.weekStart):"2026-07-27";

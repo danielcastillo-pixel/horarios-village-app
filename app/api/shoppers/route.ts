@@ -108,6 +108,23 @@ export async function POST(request:NextRequest){
     if(!shiftTypes?.length)return NextResponse.json({error:`El turno ${turnCode} no está disponible para este shopper y local`},{status:400});
     const {error}=await db.from("shopper_turns").upsert({staff_id:staffId,work_date:String(body.workDate),turn_code:turnCode,updated_at:new Date().toISOString()},{onConflict:"staff_id,work_date"});
     if(error)return NextResponse.json({error:databaseError(error,"No se pudo guardar el turno")},{status:400});
+  }else if(body.action==="fillTurns"){
+    const staffIds=[...new Set((Array.isArray(body.staffIds)?body.staffIds:[]).map(Number).filter(Number.isFinite))];
+    const workDate=String(body.workDate||""),turnCode=String(body.turnCode||"").trim().toUpperCase();
+    if(!staffIds.length||staffIds.length>200)return NextResponse.json({error:"Selecciona entre 1 y 200 filas para copiar"},{status:400});
+    if(invalidDate(workDate))return NextResponse.json({error:`La fecha debe estar entre ${SCHEDULE_MIN_DATE} y ${SCHEDULE_MAX_DATE}`},{status:400});
+    if(!turnCode)return NextResponse.json({error:"El turno que quieres copiar no es válido"},{status:400});
+    const {data:staff,error:staffError}=await db.from("shopper_staff").select("id,category,location_id").in("id",staffIds).eq("active",true);
+    if(staffError)return NextResponse.json({error:databaseError(staffError,"No se pudo validar a los shoppers")},{status:400});
+    if((staff||[]).length!==staffIds.length)return NextResponse.json({error:"Uno de los shoppers no existe o no pertenece a tus locales"},{status:400});
+    const {data:shiftTypes,error:shiftError}=await db.from("shopper_shift_types").select("category,location_id").eq("code",turnCode).eq("active",true);
+    if(shiftError)return NextResponse.json({error:databaseError(shiftError,"No se pudo validar el turno")},{status:400});
+    const invalidStaff=(staff||[]).find((person:any)=>!(shiftTypes||[]).some((type:any)=>(type.category==="both"||type.category===person.category)&&(type.location_id===null||Number(type.location_id)===Number(person.location_id))));
+    if(invalidStaff)return NextResponse.json({error:`El turno ${turnCode} no está disponible para todas las filas seleccionadas`},{status:400});
+    const rows=staffIds.map(staffId=>({staff_id:staffId,work_date:workDate,turn_code:turnCode,updated_at:new Date().toISOString()}));
+    const {error}=await db.from("shopper_turns").upsert(rows,{onConflict:"staff_id,work_date"});
+    if(error)return NextResponse.json({error:databaseError(error,"No se pudo copiar el turno")},{status:400});
+    return NextResponse.json({ok:true,copied:rows.length});
   }else if(body.action==="copyWeek"){
     const start=new Date(`${body.sourceStart}T12:00:00`),end=new Date(start);end.setDate(end.getDate()+6);
     const {data:staff,error:se}=await db.from("shopper_staff").select("id").eq("category",body.category).eq("location_id",body.locationId).eq("active",true);
