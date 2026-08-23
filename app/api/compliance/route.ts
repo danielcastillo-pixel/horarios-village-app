@@ -28,17 +28,21 @@ async function authenticate(request:NextRequest){
 
 export async function GET(request:NextRequest){
   const auth=await authenticate(request);if(auth.error)return auth.error;
-  if(auth.profile.app_role!=="admin")return NextResponse.json({error:"Este panel es privado para el administrador."},{status:403});
   const year=Number(request.nextUrl.searchParams.get("year")||new Date().getFullYear());
   if(!Number.isInteger(year)||year<2026||year>2100)return NextResponse.json({error:"Año no válido."},{status:400});
   const first=`${year}-01-01`,last=`${year}-12-31`;
-  const [{data:submissions,error:submissionError},{data:evaluations,error:evaluationError}]=await Promise.all([
+  const [{data:submissions,error:submissionError},{data:evaluations,error:evaluationError},{data:evidences,error:evidenceError}]=await Promise.all([
     auth.db.from("weekly_activity_submissions").select("*").gte("week_start",first).lte("week_start",last).order("week_start",{ascending:false}),
-    auth.db.from("administrator_evaluations").select("id,location_id,week_start,week_end,submitted_by,submitted_by_name,submitted_by_email,submitted_at,last_updated_by,last_updated_by_name,updated_at").gte("week_start",first).lte("week_start",last).order("week_start",{ascending:false})
+    auth.db.from("administrator_evaluations").select("id,location_id,week_start,week_end,submitted_by,submitted_by_name,submitted_by_email,submitted_at,last_updated_by,last_updated_by_name,updated_at").gte("week_start",first).lte("week_start",last).order("week_start",{ascending:false}),
+    auth.db.from("weekly_evidences").select("id,location_id,week_start,evidence_type,evidence_path,submitted_by_name,submitted_by_email,submitted_at,last_updated_by_name,updated_at").gte("week_start",first).lte("week_start",last).order("week_start",{ascending:false})
   ]);
-  const error=submissionError||evaluationError;
+  const error=submissionError||evaluationError||evidenceError;
   if(error)return NextResponse.json({error:error.message},{status:400});
-  return NextResponse.json({submissions:submissions||[],evaluations:evaluations||[]});
+  const evidenceRows=await Promise.all((evidences||[]).map(async row=>{
+    const {data:signed}=await auth.db.storage.from("weekly-evidence").createSignedUrl(row.evidence_path,900);
+    return {...row,evidence_url:signed?.signedUrl||null};
+  }));
+  return NextResponse.json({submissions:submissions||[],evaluations:evaluations||[],evidences:evidenceRows,isAdmin:auth.profile.app_role==="admin"});
 }
 
 export async function POST(request:NextRequest){
