@@ -566,9 +566,12 @@ export default function Home() {
       })});
       const result=await response.json().catch(()=>({error:"No se pudo copiar el turno"})) as {copied?:number;error?:string};
       if(mutationVersion!==shopperMutationVersionRef.current)return;
-      if(!response.ok)setNotice(`Error: ${result.error??"No se pudo copiar el turno"}`);
-      else setNotice(`✓ Turno ${turnCode} copiado hacia abajo en ${result.copied??targets.length} fila${targets.length===1?"":"s"}`);
-      await loadShoppers();
+      if(!response.ok){
+        setNotice(`Error: ${result.error??"No se pudo copiar el turno"}`);
+        await loadShoppers();
+      }else{
+        setNotice(`✓ Turno ${turnCode} copiado hacia abajo en ${result.copied??targets.length} fila${targets.length===1?"":"s"}`);
+      }
     }finally{
       endShopperMutation();
     }
@@ -871,11 +874,18 @@ export default function Home() {
       const response=await apiFetch("/api/shoppers",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
         action:"saveTurn",staffId:selected.staff.id,workDate:selected.date,turnCode:code
       })});
-      const result=await response.json().catch(()=>({error:"No se pudo guardar"}));
+      const result=await response.json().catch(()=>({error:"No se pudo guardar"})) as {error?:string;turn?:ShopperTurnRow};
       if(mutationVersion!==shopperMutationVersionRef.current)return;
-      if(!response.ok)setNotice(`Error: ${result.error}`);
-      else setNotice("✓ Turno guardado");
-      await loadShoppers();
+      if(!response.ok){
+        setNotice(`Error: ${result.error??"No se pudo guardar"}`);
+        await loadShoppers();
+      }else{
+        if(result.turn)setShopperTurns(current=>{
+          const withoutCell=current.filter(turn=>!(turn.staff_id===result.turn!.staff_id&&turn.work_date===result.turn!.work_date));
+          return [...withoutCell,result.turn!];
+        });
+        setNotice("✓ Turno guardado");
+      }
     }finally{
       endShopperMutation();
     }
