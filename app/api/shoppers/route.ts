@@ -42,16 +42,16 @@ export async function GET(request:NextRequest){
   const [{data:staff,error},{data:turns,error:te},{data:shiftTypes}]=await Promise.all([
     db.from("shopper_staff").select("*,locations(name)").eq("category",category).eq("active",true).order("name"),
     db.from("shopper_turns").select("*").gte("work_date",SCHEDULE_MIN_DATE).lte("work_date",SCHEDULE_MAX_DATE),
-    db.from("shopper_shift_types").select("*").or(`category.eq.${category},category.eq.both`).eq("active",true).order("code")
+    db.from("shopper_shift_types").select("*").or(`category.eq.${category},category.eq.both`).order("code")
   ]);
   if(error||te)return NextResponse.json({error:databaseError(error||te,"No se pudo cargar el horario de shoppers")},{status:400});
   const ids=new Set((staff||[]).map((x:any)=>x.id));
   const defaults=[
-    {id:-1,code:"A",label:"Apertura",start_time:"06:00",end_time:"14:00",category:"both",counts_opening:true,counts_closing:false,is_free:false,location_id:null,created_by:null,is_general:true},
-    {id:-3,code:"B",label:"Intermedio",start_time:"10:00",end_time:"18:00",category:"both",counts_opening:false,counts_closing:false,is_free:false,location_id:null,created_by:null,is_general:true},
-    {id:-4,code:"T",label:"Apertura y cierre",start_time:"13:00",end_time:"21:00",category:"both",counts_opening:true,counts_closing:true,is_free:false,location_id:null,created_by:null,is_general:true},
-    {id:-7,code:"L",label:"Libre",start_time:null,end_time:null,category:"both",counts_opening:false,counts_closing:false,is_free:true,location_id:null,created_by:null,is_general:true},
-    {id:-8,code:"V",label:"Vacaciones",start_time:null,end_time:null,category:"both",counts_opening:false,counts_closing:false,is_free:true,location_id:null,created_by:null,is_general:true}
+    {id:-1,code:"A",label:"Apertura",start_time:"06:00",end_time:"14:00",category:"both",counts_opening:true,counts_closing:false,is_free:false,location_id:null,created_by:null,is_general:true,active:true},
+    {id:-3,code:"B",label:"Intermedio",start_time:"10:00",end_time:"18:00",category:"both",counts_opening:false,counts_closing:false,is_free:false,location_id:null,created_by:null,is_general:true,active:true},
+    {id:-4,code:"T",label:"Apertura y cierre",start_time:"13:00",end_time:"21:00",category:"both",counts_opening:true,counts_closing:true,is_free:false,location_id:null,created_by:null,is_general:true,active:true},
+    {id:-7,code:"L",label:"Libre",start_time:null,end_time:null,category:"both",counts_opening:false,counts_closing:false,is_free:true,location_id:null,created_by:null,is_general:true,active:true},
+    {id:-8,code:"V",label:"Vacaciones",start_time:null,end_time:null,category:"both",counts_opening:false,counts_closing:false,is_free:true,location_id:null,created_by:null,is_general:true,active:true}
   ];
   return NextResponse.json({
     staff:(staff||[]).map((x:any)=>({...x,location_name:x.locations?.name||"",active:x.active?1:0})),
@@ -76,7 +76,7 @@ export async function POST(request:NextRequest){
     if(!Number.isFinite(staffId))return NextResponse.json({error:"Shopper inválido"},{status:400});
     const {error}=await db.from("shopper_staff").update({active:false}).eq("id",staffId);
     if(error)return NextResponse.json({error:databaseError(error,"No se pudo eliminar el shopper del horario")},{status:400});
-  }else if(body.action==="addShiftType"){
+  }else if(body.action==="addShiftType"||body.action==="updateShiftType"){
     const free=Boolean(body.isFree);
     const code=String(body.code||"").trim().toUpperCase(),label=String(body.label||"").trim();
     const category=["purchase","delivery","both"].includes(body.category)?body.category:null;
@@ -84,15 +84,23 @@ export async function POST(request:NextRequest){
     if(!/^[A-Z0-9_-]{1,6}$/.test(code))return NextResponse.json({error:"El código debe tener entre 1 y 6 letras o números"},{status:400});
     if(!label)return NextResponse.json({error:"Escribe el nombre del turno"},{status:400});
     if(!category)return NextResponse.json({error:"La categoría del turno no es válida"},{status:400});
-    if(!Number.isFinite(locationId)||locationId<=0)return NextResponse.json({error:"Selecciona el local al que pertenece el turno"},{status:400});
     if(!free&&(!/^\d{2}:\d{2}$/.test(String(body.start||""))||!/^\d{2}:\d{2}$/.test(String(body.end||""))))return NextResponse.json({error:"Selecciona una hora de inicio y una hora de fin válidas"},{status:400});
-    const values={
+    const editableValues={
       code,label,start_time:free?null:body.start,end_time:free?null:body.end,
-      category,location_id:locationId,
+      category,
       counts_opening:free?false:Boolean(body.countsOpening),
-      counts_closing:free?false:Boolean(body.countsClosing),is_free:free,
-      created_by:auth.profile.id,is_general:false
+      counts_closing:free?false:Boolean(body.countsClosing),is_free:free,active:true
     };
+    if(body.action==="updateShiftType"){
+      const shiftTypeId=Number(body.id);
+      if(!Number.isInteger(shiftTypeId)||shiftTypeId<=0)return NextResponse.json({error:"El turno seleccionado no es válido"},{status:400});
+      const {data:updated,error}=await db.from("shopper_shift_types").update(editableValues).eq("id",shiftTypeId).select("id").maybeSingle();
+      if(error)return NextResponse.json({error:databaseError(error,"No se pudo editar el turno")},{status:400});
+      if(!updated)return NextResponse.json({error:"El turno no existe o no tienes acceso para editarlo"},{status:404});
+      return NextResponse.json({ok:true,updated:true});
+    }
+    if(!Number.isFinite(locationId)||locationId<=0)return NextResponse.json({error:"Selecciona el local al que pertenece el turno"},{status:400});
+    const values={...editableValues,location_id:locationId,created_by:auth.profile.id,is_general:false};
     const {data:existing,error:existingError}=await db.from("shopper_shift_types").select("id").eq("code",code).eq("category",category).eq("location_id",locationId).eq("created_by",auth.profile.id).maybeSingle();
     if(existingError)return NextResponse.json({error:databaseError(existingError,"No se pudo validar el turno del local")},{status:400});
     const operation=existing
@@ -101,6 +109,13 @@ export async function POST(request:NextRequest){
     const {error}=await operation;
     if(error)return NextResponse.json({error:databaseError(error,"No se pudo crear el turno para este local")},{status:400});
     return NextResponse.json({ok:true,updated:Boolean(existing)});
+  }else if(body.action==="deleteShiftType"){
+    const shiftTypeId=Number(body.id);
+    if(!Number.isInteger(shiftTypeId)||shiftTypeId<=0)return NextResponse.json({error:"El turno seleccionado no es válido"},{status:400});
+    const {data:removed,error}=await db.from("shopper_shift_types").update({active:false}).eq("id",shiftTypeId).select("id").maybeSingle();
+    if(error)return NextResponse.json({error:databaseError(error,"No se pudo eliminar el turno")},{status:400});
+    if(!removed)return NextResponse.json({error:"El turno no existe o no tienes acceso para eliminarlo"},{status:404});
+    return NextResponse.json({ok:true});
   }else if(body.action==="saveTurn"){
     const staffId=Number(body.staffId),shiftTypeId=Number(body.shiftTypeId);
     if(!Number.isFinite(staffId))return NextResponse.json({error:"El shopper seleccionado no es válido"},{status:400});
