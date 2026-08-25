@@ -25,7 +25,7 @@ type ShopperShiftType={id:number;code:string;label:string;start_time:string|null
 type PresenceType="supervisor"|"purchase"|"delivery";
 type PresenceRow={key:string;name:string;initials:string;kind:PresenceType;role:string;start:string;end:string;active:boolean;minutesUntil:number};
 type FillKind="supervisor"|"shopper";
-type FillDrag={kind:FillKind;sourceIndex:number;targetIndex:number;day:number;pointerId:number};
+type FillDrag={kind:FillKind;sourceIndex:number;targetIndex:number;sourceDay:number;targetDay:number;pointerId:number};
 
 const locations = [
   "Todos los locales", "MX. Village Plaza", "SX. Plaza Batán", "SX. Villa Club",
@@ -483,7 +483,7 @@ export default function Home() {
       return;
     }
     event.currentTarget.setPointerCapture(event.pointerId);
-    setActiveFillDrag({kind,sourceIndex,targetIndex:sourceIndex,day,pointerId:event.pointerId});
+    setActiveFillDrag({kind,sourceIndex,targetIndex:sourceIndex,sourceDay:day,targetDay:day,pointerId:event.pointerId});
   }
 
   function beginShopperMutation(){
@@ -507,68 +507,84 @@ export default function Home() {
     event.preventDefault();
     if(event.clientY>window.innerHeight-70)window.scrollBy({top:28,behavior:"auto"});
     else if(event.clientY<70)window.scrollBy({top:-28,behavior:"auto"});
+    const tableWrap=event.currentTarget.closest<HTMLElement>(".table-wrap");
+    if(event.clientX>window.innerWidth-70)tableWrap?.scrollBy({left:28,behavior:"auto"});
+    else if(event.clientX<70)tableWrap?.scrollBy({left:-28,behavior:"auto"});
     const element=document.elementFromPoint(event.clientX,event.clientY);
-    const cell=element?.closest<HTMLElement>(`td[data-fill-kind="${current.kind}"][data-fill-day="${current.day}"]`);
+    const cell=element?.closest<HTMLElement>(`td[data-fill-kind="${current.kind}"]`);
     const targetIndex=Number(cell?.dataset.fillRow);
-    if(!Number.isInteger(targetIndex)||targetIndex<current.sourceIndex||targetIndex===current.targetIndex)return;
-    setActiveFillDrag({...current,targetIndex});
+    const targetDay=Number(cell?.dataset.fillDay);
+    if(!Number.isInteger(targetIndex)||!Number.isInteger(targetDay)||targetDay<0||targetDay>6||(targetIndex===current.targetIndex&&targetDay===current.targetDay))return;
+    setActiveFillDrag({...current,targetIndex,targetDay});
   }
 
   function fillCellClass(kind:FillKind,row:number,day:number){
-    if(!fillDrag||fillDrag.kind!==kind||fillDrag.day!==day)return "";
-    if(row===fillDrag.sourceIndex)return " fill-source";
-    return row>fillDrag.sourceIndex&&row<=fillDrag.targetIndex?" fill-target":"";
+    if(!fillDrag||fillDrag.kind!==kind)return "";
+    if(row===fillDrag.sourceIndex&&day===fillDrag.sourceDay)return " fill-source";
+    const rowStart=Math.min(fillDrag.sourceIndex,fillDrag.targetIndex),rowEnd=Math.max(fillDrag.sourceIndex,fillDrag.targetIndex);
+    const dayStart=Math.min(fillDrag.sourceDay,fillDrag.targetDay),dayEnd=Math.max(fillDrag.sourceDay,fillDrag.targetDay);
+    return row>=rowStart&&row<=rowEnd&&day>=dayStart&&day<=dayEnd?" fill-target":"";
   }
 
-  async function fillSupervisorDown(drag:FillDrag){
+  function fillTargets(drag:FillDrag){
+    const targets:{row:number;day:number}[]=[];
+    const rowStart=Math.min(drag.sourceIndex,drag.targetIndex),rowEnd=Math.max(drag.sourceIndex,drag.targetIndex);
+    const dayStart=Math.min(drag.sourceDay,drag.targetDay),dayEnd=Math.max(drag.sourceDay,drag.targetDay);
+    for(let row=rowStart;row<=rowEnd;row++)for(let day=dayStart;day<=dayEnd;day++)if(row!==drag.sourceIndex||day!==drag.sourceDay)targets.push({row,day});
+    return targets;
+  }
+
+  async function fillSupervisorCells(drag:FillDrag){
     const source=filtered[drag.sourceIndex];
-    const sourceShift=source?.shifts[drag.day];
-    const targets=filtered.slice(drag.sourceIndex+1,drag.targetIndex+1);
-    if(!source||!sourceShift||!targets.length)return;
-    const overwriteCount=targets.filter(person=>Boolean(person.shifts[drag.day])).length;
+    const sourceShift=source?.shifts[drag.sourceDay];
+    const targetCells=fillTargets(drag).map(target=>({person:filtered[target.row],day:target.day})).filter(target=>Boolean(target.person));
+    if(!source||!sourceShift||!targetCells.length)return;
+    const overwriteCount=targetCells.filter(target=>Boolean(target.person.shifts[target.day])).length;
     if(overwriteCount&&!window.confirm(`Se reemplazarán ${overwriteCount} turno${overwriteCount===1?"":"s"} existente${overwriteCount===1?"":"s"}. ¿Continuar?`))return;
     const roleRow=data?.roles.find(role=>role.name===sourceShift.role);
     if(!roleRow){setNotice("Error: no se encontró el rol del turno que quieres copiar");return;}
     const free=["Libre","Descanso","Vacaciones"].includes(sourceShift.role);
     const times=sourceShift.time.match(/\d{2}:\d{2}/g)??[];
     const copiedShift={...sourceShift};
-    setPeople(current=>current.map(person=>targets.some(target=>target.id===person.id)
-      ?{...person,shifts:person.shifts.map((item,index)=>index===drag.day?copiedShift:item)}
+    const targetDays=new Map<number,Set<number>>();
+    targetCells.forEach(target=>{const days=targetDays.get(target.person.id)||new Set<number>();days.add(target.day);targetDays.set(target.person.id,days);});
+    setPeople(current=>current.map(person=>targetDays.has(person.id)
+      ?{...person,shifts:person.shifts.map((item,index)=>targetDays.get(person.id)?.has(index)?copiedShift:item)}
       :person));
-    setNotice(`Copiando turno a ${targets.length} supervisor${targets.length===1?"":"es"}…`);
+    setNotice(`Copiando turno en ${targetCells.length} celda${targetCells.length===1?"":"s"}…`);
     const response=await apiFetch("/api/data",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
       action:"fillAssignments",
-      assignments:targets.map(person=>({supervisorId:person.id,workDate:dateKeys[drag.day],start:free?null:times[0],end:free?null:times[1],roleId:roleRow.id}))
+      assignments:targetCells.map(target=>({supervisorId:target.person.id,workDate:dateKeys[target.day],start:free?null:times[0],end:free?null:times[1],roleId:roleRow.id}))
     })});
     const result=await response.json().catch(()=>({error:"No se pudo copiar el turno"})) as {copied?:number;error?:string};
     if(!response.ok){setNotice(`Error: ${result.error??"No se pudo copiar el turno"}`);await loadData();return;}
-    setNotice(`✓ Turno copiado hacia abajo en ${result.copied??targets.length} fila${targets.length===1?"":"s"}`);
+    setNotice(`✓ Turno copiado en ${result.copied??targetCells.length} celda${targetCells.length===1?"":"s"}`);
     await loadData();
   }
 
-  async function fillShopperDown(drag:FillDrag){
+  async function fillShopperCells(drag:FillDrag){
     const visible=shopperStaff.filter(staff=>location==="Todos los locales"||staff.location_name===location);
     const source=visible[drag.sourceIndex];
-    const targets=visible.slice(drag.sourceIndex+1,drag.targetIndex+1);
-    const workDate=dateKeys[drag.day];
-    const sourceTurn=shopperTurns.find(turn=>turn.staff_id===source?.id&&turn.work_date===workDate);
-    if(!source||!sourceTurn?.turn_code||!sourceTurn.shift_type_id||!targets.length)return;
+    const sourceWorkDate=dateKeys[drag.sourceDay];
+    const sourceTurn=shopperTurns.find(turn=>turn.staff_id===source?.id&&turn.work_date===sourceWorkDate);
+    const targetCells=fillTargets(drag).map(target=>({staff:visible[target.row],day:target.day,workDate:dateKeys[target.day]})).filter(target=>Boolean(target.staff));
+    if(!source||!sourceTurn?.turn_code||!sourceTurn.shift_type_id||!targetCells.length)return;
     const turnCode=sourceTurn.turn_code,shiftTypeId=sourceTurn.shift_type_id;
-    const overwriteCount=targets.filter(staff=>shopperTurns.some(turn=>turn.staff_id===staff.id&&turn.work_date===workDate)).length;
+    const overwriteCount=targetCells.filter(target=>shopperTurns.some(turn=>turn.staff_id===target.staff.id&&turn.work_date===target.workDate)).length;
     if(overwriteCount&&!window.confirm(`Se reemplazarán ${overwriteCount} turno${overwriteCount===1?"":"s"} existente${overwriteCount===1?"":"s"}. ¿Continuar?`))return;
     const mutationVersion=beginShopperMutation();
     if(mutationVersion===null)return;
-    const targetIds=new Set(targets.map(staff=>staff.id));
+    const targetKeys=new Set(targetCells.map(target=>`${target.staff.id}-${target.workDate}`));
     setShopperTurns(current=>{
-      const next=current.map(turn=>targetIds.has(turn.staff_id)&&turn.work_date===workDate?{...turn,turn_code:turnCode,shift_type_id:shiftTypeId}:turn);
-      const existing=new Set(next.filter(turn=>turn.work_date===workDate).map(turn=>turn.staff_id));
-      targets.forEach((staff,index)=>{if(!existing.has(staff.id))next.push({id:-(Date.now()+index),staff_id:staff.id,work_date:workDate,turn_code:turnCode,shift_type_id:shiftTypeId});});
+      const next=current.map(turn=>targetKeys.has(`${turn.staff_id}-${turn.work_date}`)?{...turn,turn_code:turnCode,shift_type_id:shiftTypeId}:turn);
+      const existing=new Set(next.map(turn=>`${turn.staff_id}-${turn.work_date}`));
+      targetCells.forEach((target,index)=>{const key=`${target.staff.id}-${target.workDate}`;if(!existing.has(key))next.push({id:-(Date.now()+index),staff_id:target.staff.id,work_date:target.workDate,turn_code:turnCode,shift_type_id:shiftTypeId});});
       return next;
     });
-    setNotice(`Copiando turno a ${targets.length} shopper${targets.length===1?"":"s"}…`);
+    setNotice(`Copiando turno en ${targetCells.length} celda${targetCells.length===1?"":"s"}…`);
     try{
       const response=await apiFetch("/api/shoppers",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
-        action:"fillTurns",staffIds:targets.map(staff=>staff.id),workDate,shiftTypeId
+        action:"fillTurns",cells:targetCells.map(target=>({staffId:target.staff.id,workDate:target.workDate})),shiftTypeId
       })});
       const result=await response.json().catch(()=>({error:"No se pudo copiar el turno"})) as {copied?:number;error?:string};
       if(mutationVersion!==shopperMutationVersionRef.current)return;
@@ -576,7 +592,7 @@ export default function Home() {
         setNotice(`Error: ${result.error??"No se pudo copiar el turno"}`);
         await loadShoppers();
       }else{
-        setNotice(`✓ Turno ${turnCode} copiado hacia abajo en ${result.copied??targets.length} fila${targets.length===1?"":"s"}`);
+        setNotice(`✓ Turno ${turnCode} copiado en ${result.copied??targetCells.length} celda${targetCells.length===1?"":"s"}`);
       }
     }finally{
       endShopperMutation();
@@ -589,12 +605,12 @@ export default function Home() {
     event.preventDefault();
     event.stopPropagation();
     setActiveFillDrag(null);
-    if(current.targetIndex===current.sourceIndex){
-      setNotice("Mantén presionado el cuadro naranja y arrástralo hacia abajo para copiar el turno");
+    if(current.targetIndex===current.sourceIndex&&current.targetDay===current.sourceDay){
+      setNotice("Mantén presionado el cuadro naranja y arrástralo en cualquier dirección para copiar el turno");
       return;
     }
-    if(current.kind==="supervisor")await fillSupervisorDown(current);
-    else await fillShopperDown(current);
+    if(current.kind==="supervisor")await fillSupervisorCells(current);
+    else await fillShopperCells(current);
   }
 
   function cancelFillDrag(event:ReactPointerEvent<HTMLButtonElement>){
@@ -1167,7 +1183,7 @@ export default function Home() {
         </section>}
 
         {active === "Horarios" && <section className="schedule-card" ref={scheduleRef}>
-          <div className="schedule-title"><div><h2>Horario semanal</h2><p>Puedes editar nombres, quitar filas y modificar los turnos de tus locales asignados. Las semanas anteriores conservan su historial.</p><span className="fill-help"><i /> Arrastra el cuadro naranja de un turno hacia abajo para copiarlo.</span></div><div className="schedule-actions"><button className="schedule-action-button publish-action" onClick={()=>void publishWeeklyActivity("supervisor_schedule")}>✓ Publicar semana</button><button className="schedule-action-button" onClick={() => setCreate("supervisor")}>＋ Agregar supervisor</button><button className="schedule-action-button" onClick={()=>void copyWeek()}>▣ Copiar semana</button><button className="schedule-action-button image-action" onClick={()=>void downloadScheduleImage()}>▧ Descargar imagen</button></div></div>
+          <div className="schedule-title"><div><h2>Horario semanal</h2><p>Puedes editar nombres, quitar filas y modificar los turnos de tus locales asignados. Las semanas anteriores conservan su historial.</p><span className="fill-help"><i /> Arrastra el cuadro naranja hacia arriba, abajo, izquierda o derecha para copiar.</span></div><div className="schedule-actions"><button className="schedule-action-button publish-action" onClick={()=>void publishWeeklyActivity("supervisor_schedule")}>✓ Publicar semana</button><button className="schedule-action-button" onClick={() => setCreate("supervisor")}>＋ Agregar supervisor</button><button className="schedule-action-button" onClick={()=>void copyWeek()}>▣ Copiar semana</button><button className="schedule-action-button image-action" onClick={()=>void downloadScheduleImage()}>▧ Descargar imagen</button></div></div>
           <div className="toolbar">
             <div className="week"><button aria-label="Semana anterior" onClick={() => changeWeek(-1)}>‹</button><strong>{weekLabel}</strong><button aria-label="Semana siguiente" onClick={() => changeWeek(1)}>›</button></div>
             <select value={location} onChange={e => setLocation(e.target.value)}>{isAdmin && <option>Todos los locales</option>}{(data?.locations.map(l => l.name) ?? locations.slice(1)).map(l => <option key={l}>{l}</option>)}</select>
@@ -1177,7 +1193,7 @@ export default function Home() {
             <thead><tr><th>Supervisor</th>{days.map(d => <th key={d}>{d}</th>)}<th>Horas</th></tr></thead>
             <tbody>{filtered.map((person,rowIndex) => <tr key={person.id}>
               <td><div className="person"><span className="avatar">{person.initials}</span><div className="person-info"><button className="person-name" onClick={() => openSupervisorEditor(person)}>{person.name} <span>✎</span></button><small>{person.location}</small></div><button className="remove-row" aria-label={`Quitar fila de ${person.name}`} title="Quitar desde esta semana" onClick={() => void removeSupervisorRow(person)}>×</button></div></td>
-              {person.shifts.map((item, day) => <td key={day} data-fill-kind="supervisor" data-fill-row={rowIndex} data-fill-day={day}><div className={`fillable-cell${fillCellClass("supervisor",rowIndex,day)}`}><button className={`shift ${item?.tone ?? "empty"}`} onClick={() => setModal({person,day})}>{item ? <><strong>{item.time}</strong><span>{item.role}</span></> : <><strong>＋ Agregar</strong><span>turno</span></>}</button>{item&&<button type="button" className="fill-handle" aria-label={`Copiar el turno de ${person.name} hacia abajo`} title="Arrastra hacia abajo para copiar" onClick={event=>event.stopPropagation()} onPointerDown={event=>beginFillDrag("supervisor",rowIndex,day,event)} onPointerMove={moveFillDrag} onPointerUp={event=>void endFillDrag(event)} onPointerCancel={cancelFillDrag} />}</div></td>)}
+              {person.shifts.map((item, day) => <td key={day} data-fill-kind="supervisor" data-fill-row={rowIndex} data-fill-day={day}><div className={`fillable-cell${fillCellClass("supervisor",rowIndex,day)}`}><button className={`shift ${item?.tone ?? "empty"}`} onClick={() => setModal({person,day})}>{item ? <><strong>{item.time}</strong><span>{item.role}</span></> : <><strong>＋ Agregar</strong><span>turno</span></>}</button>{item&&<button type="button" className="fill-handle" aria-label={`Copiar el turno de ${person.name} en varias celdas`} title="Arrastra en cualquier dirección para copiar" onClick={event=>event.stopPropagation()} onPointerDown={event=>beginFillDrag("supervisor",rowIndex,day,event)} onPointerMove={moveFillDrag} onPointerUp={event=>void endFillDrag(event)} onPointerCancel={cancelFillDrag} />}</div></td>)}
               <td className="hours">{displayHours(hoursFor(person))} h</td>
             </tr>)}</tbody>
           </table></div>
@@ -1186,7 +1202,7 @@ export default function Home() {
         {active==="Shoppers"&&<section className="schedule-card shopper-schedule" ref={shopperScheduleRef}>
           <div className="shopper-view-tabs"><button className={shopperView==="schedule"?"active":""} onClick={()=>setShopperView("schedule")}><i>▦</i><span><strong>Horarios</strong><small>Programación semanal</small></span></button><button className={shopperView==="directory"?"active":""} onClick={()=>setShopperView("directory")}><i>⌕</i><span><strong>Repositorio de shoppers</strong><small>Buscar IDs y cambiar locales</small></span></button></div>
           {shopperView==="schedule"?<>
-          <div className="schedule-title"><div><h2>Horario de shoppers</h2><p>Programación por turnos del personal de tus locales asignados.</p><span className="fill-help"><i /> Arrastra el cuadro naranja de un turno hacia abajo para copiarlo.</span></div><div className="schedule-actions shopper-actions"><button className="schedule-action-button publish-action" onClick={()=>void publishWeeklyActivity(shopperCategory==="purchase"?"shopper_purchase":"shopper_delivery")}>✓ Publicar {shopperCategory==="purchase"?"compra":"entrega"}</button><button className="schedule-action-button" onClick={()=>setAddShopper(true)}>＋ Agregar shopper</button><button className="schedule-action-button" onClick={()=>setAddShopperShift(true)}>＋ Crear turno</button><button className="schedule-action-button" onClick={()=>void copyShopperWeek()}>▣ Copiar semana</button><button className="schedule-action-button image-action" onClick={()=>setShopperImageChoice(true)}>▧ Descargar imagen</button></div></div>
+          <div className="schedule-title"><div><h2>Horario de shoppers</h2><p>Programación por turnos del personal de tus locales asignados.</p><span className="fill-help"><i /> Arrastra el cuadro naranja hacia arriba, abajo, izquierda o derecha para copiar.</span></div><div className="schedule-actions shopper-actions"><button className="schedule-action-button publish-action" onClick={()=>void publishWeeklyActivity(shopperCategory==="purchase"?"shopper_purchase":"shopper_delivery")}>✓ Publicar {shopperCategory==="purchase"?"compra":"entrega"}</button><button className="schedule-action-button" onClick={()=>setAddShopper(true)}>＋ Agregar shopper</button><button className="schedule-action-button" onClick={()=>setAddShopperShift(true)}>＋ Crear turno</button><button className="schedule-action-button" onClick={()=>void copyShopperWeek()}>▣ Copiar semana</button><button className="schedule-action-button image-action" onClick={()=>setShopperImageChoice(true)}>▧ Descargar imagen</button></div></div>
           <div className="shopper-submenu"><button className={shopperCategory==="purchase"?"active":""} onClick={()=>setShopperCategory("purchase")}>Asesores de compra</button><button className={shopperCategory==="delivery"?"active":""} onClick={()=>setShopperCategory("delivery")}>Repartidores</button></div>
           <div className="toolbar"><div className="week"><button onClick={()=>changeWeek(-1)}>‹</button><strong>{weekLabel}</strong><button onClick={()=>changeWeek(1)}>›</button></div><select value={location} onChange={e=>setLocation(e.target.value)}>{isAdmin&&<option>Todos los locales</option>}{data?.locations.map(l=><option key={l.id}>{l.name}</option>)}</select></div>
           {(()=>{
@@ -1198,7 +1214,7 @@ export default function Home() {
             });
             return <><div className="turn-kpis"><article><strong>{visible.length}</strong><span>Personal</span></article><article><strong>{types.filter(t=>t.counts_opening).length}</strong><span>Aperturas</span></article><article><strong>{types.filter(t=>!t.is_free&&!t.counts_opening&&!t.counts_closing).length}</strong><span>Intermedios</span></article><article><strong>{types.filter(t=>t.counts_closing).length}</strong><span>Cierres</span></article><article><strong>{types.filter(t=>t.is_free).length}</strong><span>Libres</span></article></div>
             <div className="daily-coverage"><div className="daily-coverage-head"><div><strong>Cobertura diaria</strong><span>Personal asignado por tipo de turno cada día</span></div><small>{shopperCategory==="purchase"?"Asesores de compra":"Repartidores"}</small></div><div className="daily-coverage-scroll">{daily.map(day=><article className="daily-card" key={day.date}><strong>{day.label}</strong><div><span>Apertura</span><b className="opening">{day.opening}</b></div><div><span>Intermedio</span><b className="intermediate">{day.intermediate}</b></div><div><span>Cierre</span><b className="closing">{day.closing}</b></div><div><span>Libre / Vac.</span><b className="free">{day.free}</b></div></article>)}</div></div>
-            <div className={`table-wrap shopper-scalable${visible.length>20?" shopper-table-compact":""}`}><table><thead><tr><th>{shopperCategory==="purchase"?"Asesor de compra":"Repartidor"}</th>{days.map(d=><th key={d}>{d}</th>)}<th>Aperturas</th><th>Cierres</th>{isAdmin&&<th>Horas</th>}</tr></thead><tbody>{visible.map((staff,rowIndex)=>{const weekly=dateKeys.map(d=>shopperTurns.find(t=>t.staff_id===staff.id&&t.work_date===d)?.turn_code||"");const weeklyTypes=weekly.map(code=>shopperShiftFor(code,staff.location_id));const weeklyHours=weeklyTypes.reduce((total,type)=>total+shopperShiftHours(type),0);return <tr key={staff.id}><td><div className="person"><span className="avatar">{staff.name.split(" ").map(x=>x[0]).join("").slice(0,2)}</span><div className="person-info"><div className="shopper-name-line"><strong className="shopper-name-text">{staff.name}</strong><div className="shopper-row-actions"><button className="shopper-action edit" onClick={()=>setEditShopper(staff)} title={`Editar a ${staff.name}`} aria-label={`Editar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l11-11-4-4L4 16v4Zm12.2-16.2 4 4 1.1-1.1a1.4 1.4 0 0 0 0-2l-2-2a1.4 1.4 0 0 0-2 0l-1.1 1.1Z"/></svg></button><button className="shopper-action delete" onClick={()=>setDeleteShopper(staff)} title={`Eliminar a ${staff.name}`} aria-label={`Eliminar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8l1 2h4v2H3V5h4l1-2Zm-2 6h12l-1 12H7L6 9Zm4 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z"/></svg></button></div></div><small>{staff.employment_type} · {staff.location_name} <span className="shopper-inline-id">ID {staff.shopper_external_id||"—"}</span></small></div></div></td>{dateKeys.map((d,i)=><td key={d} data-fill-kind="shopper" data-fill-row={rowIndex} data-fill-day={i}><div className={`fillable-cell${fillCellClass("shopper",rowIndex,i)}`}><button className={`turn-code turn-${weekly[i]||"empty"}`} onClick={()=>openShopperTurnModal(staff,d)}>{weekly[i]||"＋"}</button>{weekly[i]&&<button type="button" className="fill-handle" aria-label={`Copiar el turno de ${staff.name} hacia abajo`} title="Arrastra hacia abajo para copiar" onClick={event=>event.stopPropagation()} onPointerDown={event=>beginFillDrag("shopper",rowIndex,i,event)} onPointerMove={moveFillDrag} onPointerUp={event=>void endFillDrag(event)} onPointerCancel={cancelFillDrag} />}</div></td>)}<td className="hours">{weeklyTypes.filter(t=>t?.counts_opening).length}</td><td className="hours">{weeklyTypes.filter(t=>t?.counts_closing).length}</td>{isAdmin&&<td className="hours shopper-hours">{displayHours(weeklyHours)} h</td>}</tr>})}</tbody></table></div></>
+            <div className={`table-wrap shopper-scalable${visible.length>20?" shopper-table-compact":""}`}><table><thead><tr><th>{shopperCategory==="purchase"?"Asesor de compra":"Repartidor"}</th>{days.map(d=><th key={d}>{d}</th>)}<th>Aperturas</th><th>Cierres</th>{isAdmin&&<th>Horas</th>}</tr></thead><tbody>{visible.map((staff,rowIndex)=>{const weekly=dateKeys.map(d=>shopperTurns.find(t=>t.staff_id===staff.id&&t.work_date===d)?.turn_code||"");const weeklyTypes=weekly.map(code=>shopperShiftFor(code,staff.location_id));const weeklyHours=weeklyTypes.reduce((total,type)=>total+shopperShiftHours(type),0);return <tr key={staff.id}><td><div className="person"><span className="avatar">{staff.name.split(" ").map(x=>x[0]).join("").slice(0,2)}</span><div className="person-info"><div className="shopper-name-line"><strong className="shopper-name-text">{staff.name}</strong><div className="shopper-row-actions"><button className="shopper-action edit" onClick={()=>setEditShopper(staff)} title={`Editar a ${staff.name}`} aria-label={`Editar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l11-11-4-4L4 16v4Zm12.2-16.2 4 4 1.1-1.1a1.4 1.4 0 0 0 0-2l-2-2a1.4 1.4 0 0 0-2 0l-1.1 1.1Z"/></svg></button><button className="shopper-action delete" onClick={()=>setDeleteShopper(staff)} title={`Eliminar a ${staff.name}`} aria-label={`Eliminar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8l1 2h4v2H3V5h4l1-2Zm-2 6h12l-1 12H7L6 9Zm4 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z"/></svg></button></div></div><small>{staff.employment_type} · {staff.location_name} <span className="shopper-inline-id">ID {staff.shopper_external_id||"—"}</span></small></div></div></td>{dateKeys.map((d,i)=><td key={d} data-fill-kind="shopper" data-fill-row={rowIndex} data-fill-day={i}><div className={`fillable-cell${fillCellClass("shopper",rowIndex,i)}`}><button className={`turn-code turn-${weekly[i]||"empty"}`} onClick={()=>openShopperTurnModal(staff,d)}>{weekly[i]||"＋"}</button>{weekly[i]&&<button type="button" className="fill-handle" aria-label={`Copiar el turno de ${staff.name} en varias celdas`} title="Arrastra en cualquier dirección para copiar" onClick={event=>event.stopPropagation()} onPointerDown={event=>beginFillDrag("shopper",rowIndex,i,event)} onPointerMove={moveFillDrag} onPointerUp={event=>void endFillDrag(event)} onPointerCancel={cancelFillDrag} />}</div></td>)}<td className="hours">{weeklyTypes.filter(t=>t?.counts_opening).length}</td><td className="hours">{weeklyTypes.filter(t=>t?.counts_closing).length}</td>{isAdmin&&<td className="hours shopper-hours">{displayHours(weeklyHours)} h</td>}</tr>})}</tbody></table></div></>
           })()}</>:<div className="shopper-directory">
             <div className="directory-heading"><div><h2>Repositorio de shoppers</h2><p>Busca por ID o nombre y administra el local asignado.</p></div><span>{shopperDirectory.length} registros</span></div>
             <label className="shopper-id-search"><span>⌕</span><input value={shopperDirectoryQuery} onChange={event=>setShopperDirectoryQuery(event.target.value)} placeholder="Buscar por ID de shopper o nombre…" /></label>
@@ -1224,7 +1240,7 @@ export default function Home() {
         {active === "Calificación administrador" && data && <AdministratorRatings locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
         {active === "Constancias" && data && <Constancias locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
         {active === "Autorizaciones" && data && <Authorizations locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
-        {active === "Cumplimiento semanal" && data && <WeeklyCompliance locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
+        {active === "Cumplimiento semanal" && data && <WeeklyCompliance locations={data.locations} supervisors={data.supervisors} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
 
         {active === "Reportes" && <section className="management-card">
           <div className="management-head"><div><h2>Reporte de asesores de compra</h2><p>Genera el libro Excel 97-2003 con ID, mes, día, horas y día libre.</p></div><button className="primary" onClick={downloadShopperReport}>⇩ Generar Excel</button></div>

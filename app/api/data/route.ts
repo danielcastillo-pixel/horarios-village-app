@@ -88,7 +88,7 @@ export async function POST(request:NextRequest) {
   },{onConflict:"supervisor_id,work_date"});
   else if(body.action==="fillAssignments"){
     const assignments=Array.isArray(body.assignments)?body.assignments:[];
-    if(!assignments.length||assignments.length>200)return NextResponse.json({error:"Selecciona entre 1 y 200 filas para copiar"},{status:400});
+    if(!assignments.length||assignments.length>500)return NextResponse.json({error:"Selecciona entre 1 y 500 celdas para copiar"},{status:400});
     const rows=assignments.map((assignment:any)=>({
       supervisor_id:Number(assignment.supervisorId),work_date:String(assignment.workDate||""),
       start_time:assignment.start===null?null:String(assignment.start||""),end_time:assignment.end===null?null:String(assignment.end||""),
