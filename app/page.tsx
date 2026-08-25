@@ -42,7 +42,7 @@ const adminNav = [
   ["◫", "Turnos y roles"], ["♟", "Shoppers"], ["★", "Calificación administrador"], ["▧", "Constancias"], ["✓", "Cumplimiento semanal"], ["$", "Autorizaciones"], ["⌂", "Locales"], ["▥", "Reportes"], ["⚿", "Accesos"]
 ];
 const supervisorNav = [["▣", "Horarios"],["◫", "Turnos y roles"],["♟", "Shoppers"],["★", "Calificación administrador"],["▧", "Constancias"],["✓", "Cumplimiento semanal"],["$", "Autorizaciones"],["▥", "Reportes"]];
-const navigationLabel = (label:string) => label === "Horarios" ? "Horario Supervisor" : label === "Shoppers" ? "Horario Shoppers" : label;
+const navigationLabel = (label:string) => label === "Horarios" ? "Horario Supervisor" : label === "Shoppers" ? "Horario Shoppers" : label === "Reportes" ? "Asignación automática de compra" : label;
 const navigationIconPaths:Record<string,string[]> = {
   "Panel general":["M3 11.5 12 4l9 7.5","M5.5 10.5V20h13v-9.5","M9.5 20v-6h5v6"],
   "Horarios":["M4 5h16v15H4z","M8 3v4M16 3v4M4 9h16","M8 13h2M14 13h2M8 17h2M14 17h2"],
@@ -997,7 +997,7 @@ export default function Home() {
     if(!selected){setNotice("Selecciona el local del reporte");return;}
     if(!reportStart||!reportEnd||reportStart>reportEnd){setNotice("Selecciona un rango de fechas válido");return;}
     const staff=shopperStaff.filter(s=>s.location_id===selected.id&&s.category==="purchase");
-    if(!staff.length){setNotice("No existen asesores de compra para ese local");return;}
+    if(!staff.length){setNotice("No existen datos para la asignación automática de compra en ese local");return;}
     const dates:string[]=[];const cursor=new Date(`${reportStart}T12:00:00`),last=new Date(`${reportEnd}T12:00:00`);
     while(cursor<=last){dates.push(cursor.toISOString().slice(0,10));cursor.setDate(cursor.getDate()+1);}
     const rows:(string|number)[][]=staff.flatMap(person=>dates.map(date=>{
@@ -1011,12 +1011,12 @@ export default function Home() {
     const sheet=XLSX.utils.aoa_to_sheet([["ID_SHOPPER","MES","DIA","HORA_INICIO","HORA_FIN","DIA_LIBRE"],...rows]);
     sheet["!cols"]=[{wch:14},{wch:8},{wch:8},{wch:15},{wch:13},{wch:12}];
     const workbook=XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook,sheet,"HORARIO");
+    XLSX.utils.book_append_sheet(workbook,sheet,"ASIGNACION COMPRA");
     try{
-      await downloadWorkbook97(workbook,`Horario_Asesores_Compra_${selected.name.replace(/[^a-z0-9]+/gi,"_")}_${reportStart}_${reportEnd}.xls`);
-      setNotice("✓ Libro Excel 97-2003 generado correctamente");
+      await downloadWorkbook97(workbook,`Asignacion_Automatica_Compra_${selected.name.replace(/[^a-z0-9]+/gi,"_")}_${reportStart}_${reportEnd}.xls`);
+      setNotice("✓ Asignación automática de compra generada correctamente");
     }catch(error){
-      if(!(error instanceof DOMException&&error.name==="AbortError"))setNotice("Error: no se pudo generar el reporte");
+      if(!(error instanceof DOMException&&error.name==="AbortError"))setNotice("Error: no se pudo generar la asignación automática de compra");
     }
   }
 
@@ -1252,7 +1252,7 @@ export default function Home() {
         {active === "Cumplimiento semanal" && data && <WeeklyCompliance locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
 
         {active === "Reportes" && <section className="management-card">
-          <div className="management-head"><div><h2>Reporte de asesores de compra</h2><p>Genera el libro Excel 97-2003 con ID, mes, día, horas y día libre.</p></div><button className="primary" onClick={downloadShopperReport}>⇩ Generar Excel</button></div>
+          <div className="management-head"><div><h2>Asignación automática de compra</h2><p>Genera la asignación automática de compra en Excel con ID, mes, día, horas y día libre.</p></div><button className="primary" onClick={downloadShopperReport}>⇩ Descargar asignación</button></div>
           <div className="report-filters">
             <label>Local<select value={reportLocation} onChange={e=>setReportLocation(e.target.value)}>{isAdmin && <option value="">Seleccionar local</option>}{data?.locations.map(l=><option key={l.id} value={l.name}>{l.name} · {l.city}</option>)}</select></label>
             <label>Desde<input type="date" min={SCHEDULE_MIN_DATE} max={SCHEDULE_MAX_DATE} value={reportStart} onChange={e=>setReportStart(e.target.value)} /></label>
