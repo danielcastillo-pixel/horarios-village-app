@@ -42,7 +42,8 @@ const adminNav = [
   ["◫", "Turnos y roles"], ["♟", "Shoppers"], ["★", "Calificación administrador"], ["▧", "Constancias"], ["✓", "Cumplimiento semanal"], ["$", "Autorizaciones"], ["⌂", "Locales"], ["▥", "Reportes"], ["⚿", "Accesos"]
 ];
 const supervisorNav = [["▣", "Horarios"],["◫", "Turnos y roles"],["♟", "Shoppers"],["★", "Calificación administrador"],["▧", "Constancias"],["✓", "Cumplimiento semanal"],["$", "Autorizaciones"],["▥", "Reportes"]];
-const navigationLabel = (label:string) => label === "Horarios" ? "Horario Supervisor" : label === "Shoppers" ? "Horario Shoppers" : label;
+const navigationLabel = (label:string) => label === "Horarios" ? "Horario Supervisor" : label === "Shoppers" ? "Horario Shoppers" : label === "Reportes" ? "Asignación automática de compra" : label;
+const navigationMenuLabel = (label:string) => label === "Reportes" ? "Asignación de compra" : navigationLabel(label);
 const navigationIconPaths:Record<string,string[]> = {
   "Panel general":["M3 11.5 12 4l9 7.5","M5.5 10.5V20h13v-9.5","M9.5 20v-6h5v6"],
   "Horarios":["M4 5h16v15H4z","M8 3v4M16 3v4M4 9h16","M8 13h2M14 13h2M8 17h2M14 17h2"],
@@ -166,6 +167,7 @@ export default function Home() {
   const scheduleRef=useRef<HTMLElement|null>(null);
   const [shopperCategory,setShopperCategory]=useState<"purchase"|"delivery">("purchase");
   const [shopperView,setShopperView]=useState<"schedule"|"directory">("schedule");
+  const [showShopperHours,setShowShopperHours]=useState(false);
   const [shopperImageChoice,setShopperImageChoice]=useState(false);
   const [shopperStaff,setShopperStaff]=useState<ShopperRow[]>([]);
   const [shopperDirectory,setShopperDirectory]=useState<ShopperRow[]>([]);
@@ -890,6 +892,13 @@ export default function Home() {
     return difference/60;
   }
 
+  function shopperShiftSchedule(shiftType:ShopperShiftType|undefined,code:string){
+    if(!shiftType)return code;
+    if(shiftType.is_free)return shiftType.label||shopperShiftLabel(shiftType);
+    if(shiftType.start_time&&shiftType.end_time)return `${shiftType.start_time.slice(0,5)}–${shiftType.end_time.slice(0,5)}`;
+    return code;
+  }
+
   async function saveShopperTurn(shiftTypeId:number|string){
     if(!shopperModal)return;
     const selectedId=typeof shiftTypeId==="number"?shiftTypeId:Number.NaN;
@@ -989,7 +998,7 @@ export default function Home() {
     if(!selected){setNotice("Selecciona el local del reporte");return;}
     if(!reportStart||!reportEnd||reportStart>reportEnd){setNotice("Selecciona un rango de fechas válido");return;}
     const staff=shopperStaff.filter(s=>s.location_id===selected.id&&s.category==="purchase");
-    if(!staff.length){setNotice("No existen asesores de compra para ese local");return;}
+    if(!staff.length){setNotice("No existen datos para la asignación automática de compra en ese local");return;}
     const dates:string[]=[];const cursor=new Date(`${reportStart}T12:00:00`),last=new Date(`${reportEnd}T12:00:00`);
     while(cursor<=last){dates.push(cursor.toISOString().slice(0,10));cursor.setDate(cursor.getDate()+1);}
     const rows:(string|number)[][]=staff.flatMap(person=>dates.map(date=>{
@@ -1003,12 +1012,12 @@ export default function Home() {
     const sheet=XLSX.utils.aoa_to_sheet([["ID_SHOPPER","MES","DIA","HORA_INICIO","HORA_FIN","DIA_LIBRE"],...rows]);
     sheet["!cols"]=[{wch:14},{wch:8},{wch:8},{wch:15},{wch:13},{wch:12}];
     const workbook=XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook,sheet,"HORARIO");
+    XLSX.utils.book_append_sheet(workbook,sheet,"ASIGNACION COMPRA");
     try{
-      await downloadWorkbook97(workbook,`Horario_Asesores_Compra_${selected.name.replace(/[^a-z0-9]+/gi,"_")}_${reportStart}_${reportEnd}.xls`);
-      setNotice("✓ Libro Excel 97-2003 generado correctamente");
+      await downloadWorkbook97(workbook,`Asignacion_Automatica_Compra_${selected.name.replace(/[^a-z0-9]+/gi,"_")}_${reportStart}_${reportEnd}.xls`);
+      setNotice("✓ Asignación automática de compra generada correctamente");
     }catch(error){
-      if(!(error instanceof DOMException&&error.name==="AbortError"))setNotice("Error: no se pudo generar el reporte");
+      if(!(error instanceof DOMException&&error.name==="AbortError"))setNotice("Error: no se pudo generar la asignación automática de compra");
     }
   }
 
@@ -1140,7 +1149,7 @@ export default function Home() {
           </div>
           <strong>Región Sur</strong>
         </div>
-        <nav>{visibleNav.map(([,label]) => <button key={label} title={sidebarCollapsed?navigationLabel(label):undefined} className={active === label ? "active" : ""} onClick={() => {setActive(label);setMobileMenuOpen(false)}}><i><NavigationIcon label={label} /></i><span>{navigationLabel(label)}</span></button>)}</nav>
+        <nav>{visibleNav.map(([,label]) => <button key={label} title={sidebarCollapsed?navigationMenuLabel(label):undefined} className={active === label ? "active" : ""} onClick={() => {setActive(label);setMobileMenuOpen(false)}}><i><NavigationIcon label={label} /></i><span>{navigationMenuLabel(label)}</span></button>)}</nav>
         <div className="profile"><div className="avatar admin">{data?.currentUser.name.split(" ").map(x=>x[0]).join("").slice(0,2).toUpperCase()}</div><div><strong>{data?.currentUser.name}</strong><span>{isAdmin?"Administrador total":"Supervisor de local"}</span></div></div>
         <button className="logout" onClick={() => void signOutSafely()}><i><NavigationIcon label="Cerrar sesión" /></i><span>Cerrar sesión</span></button>
         {isAdmin && <button className="settings" onClick={() => {setActive("Configuración");setMobileMenuOpen(false)}}><i><NavigationIcon label="Configuración" /></i><span>Configuración</span></button>}
@@ -1207,14 +1216,15 @@ export default function Home() {
           <div className="toolbar"><div className="week"><button onClick={()=>changeWeek(-1)}>‹</button><strong>{weekLabel}</strong><button onClick={()=>changeWeek(1)}>›</button></div><select value={location} onChange={e=>setLocation(e.target.value)}>{isAdmin&&<option>Todos los locales</option>}{data?.locations.map(l=><option key={l.id}>{l.name}</option>)}</select></div>
           {(()=>{
             const visible=shopperStaff.filter(s=>location==="Todos los locales"||s.location_name===location);
-            const types=visible.flatMap(s=>dateKeys.map(d=>{const code=shopperTurns.find(t=>t.staff_id===s.id&&t.work_date===d)?.turn_code||"";return shopperShiftFor(code,s.location_id)}).filter(Boolean) as ShopperShiftType[]);
+            const types=visible.flatMap(s=>dateKeys.map(d=>{const turn=shopperTurns.find(t=>t.staff_id===s.id&&t.work_date===d);return shopperShiftFor(turn?.turn_code||"",s.location_id,turn?.shift_type_id)}).filter(Boolean) as ShopperShiftType[]);
             const daily=dateKeys.map((date,index)=>{
-              const dayTypes=visible.map(s=>{const code=shopperTurns.find(t=>t.staff_id===s.id&&t.work_date===date)?.turn_code||"";return shopperShiftFor(code,s.location_id)}).filter(Boolean) as ShopperShiftType[];
+              const dayTypes=visible.map(s=>{const turn=shopperTurns.find(t=>t.staff_id===s.id&&t.work_date===date);return shopperShiftFor(turn?.turn_code||"",s.location_id,turn?.shift_type_id)}).filter(Boolean) as ShopperShiftType[];
               return {date,label:days[index],opening:dayTypes.filter(t=>t.counts_opening).length,intermediate:dayTypes.filter(t=>!t.is_free&&!t.counts_opening&&!t.counts_closing).length,closing:dayTypes.filter(t=>t.counts_closing).length,free:dayTypes.filter(t=>t.is_free).length};
             });
             return <><div className="turn-kpis"><article><strong>{visible.length}</strong><span>Personal</span></article><article><strong>{types.filter(t=>t.counts_opening).length}</strong><span>Aperturas</span></article><article><strong>{types.filter(t=>!t.is_free&&!t.counts_opening&&!t.counts_closing).length}</strong><span>Intermedios</span></article><article><strong>{types.filter(t=>t.counts_closing).length}</strong><span>Cierres</span></article><article><strong>{types.filter(t=>t.is_free).length}</strong><span>Libres</span></article></div>
             <div className="daily-coverage"><div className="daily-coverage-head"><div><strong>Cobertura diaria</strong><span>Personal asignado por tipo de turno cada día</span></div><small>{shopperCategory==="purchase"?"Asesores de compra":"Repartidores"}</small></div><div className="daily-coverage-scroll">{daily.map(day=><article className="daily-card" key={day.date}><strong>{day.label}</strong><div><span>Apertura</span><b className="opening">{day.opening}</b></div><div><span>Intermedio</span><b className="intermediate">{day.intermediate}</b></div><div><span>Cierre</span><b className="closing">{day.closing}</b></div><div><span>Libre / Vac.</span><b className="free">{day.free}</b></div></article>)}</div></div>
-            <div className={`table-wrap shopper-scalable${visible.length>20?" shopper-table-compact":""}`}><table><thead><tr><th>{shopperCategory==="purchase"?"Asesor de compra":"Repartidor"}</th>{days.map(d=><th key={d}>{d}</th>)}<th>Aperturas</th><th>Cierres</th>{isAdmin&&<th>Horas</th>}</tr></thead><tbody>{visible.map((staff,rowIndex)=>{const weekly=dateKeys.map(d=>shopperTurns.find(t=>t.staff_id===staff.id&&t.work_date===d)?.turn_code||"");const weeklyTypes=weekly.map(code=>shopperShiftFor(code,staff.location_id));const weeklyHours=weeklyTypes.reduce((total,type)=>total+shopperShiftHours(type),0);return <tr key={staff.id}><td><div className="person"><span className="avatar">{staff.name.split(" ").map(x=>x[0]).join("").slice(0,2)}</span><div className="person-info"><div className="shopper-name-line"><strong className="shopper-name-text">{staff.name}</strong><div className="shopper-row-actions"><button className="shopper-action edit" onClick={()=>setEditShopper(staff)} title={`Editar a ${staff.name}`} aria-label={`Editar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l11-11-4-4L4 16v4Zm12.2-16.2 4 4 1.1-1.1a1.4 1.4 0 0 0 0-2l-2-2a1.4 1.4 0 0 0-2 0l-1.1 1.1Z"/></svg></button><button className="shopper-action delete" onClick={()=>setDeleteShopper(staff)} title={`Eliminar a ${staff.name}`} aria-label={`Eliminar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8l1 2h4v2H3V5h4l1-2Zm-2 6h12l-1 12H7L6 9Zm4 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z"/></svg></button></div></div><small>{staff.employment_type} · {staff.location_name} <span className="shopper-inline-id">ID {staff.shopper_external_id||"—"}</span></small></div></div></td>{dateKeys.map((d,i)=><td key={d} data-fill-kind="shopper" data-fill-row={rowIndex} data-fill-day={i}><div className={`fillable-cell${fillCellClass("shopper",rowIndex,i)}`}><button className={`turn-code turn-${weekly[i]||"empty"}`} onClick={()=>openShopperTurnModal(staff,d)}>{weekly[i]||"＋"}</button>{weekly[i]&&<button type="button" className="fill-handle" aria-label={`Copiar el turno de ${staff.name} en varias celdas`} title="Arrastra en cualquier dirección para copiar" onClick={event=>event.stopPropagation()} onPointerDown={event=>beginFillDrag("shopper",rowIndex,i,event)} onPointerMove={moveFillDrag} onPointerUp={event=>void endFillDrag(event)} onPointerCancel={cancelFillDrag} />}</div></td>)}<td className="hours">{weeklyTypes.filter(t=>t?.counts_opening).length}</td><td className="hours">{weeklyTypes.filter(t=>t?.counts_closing).length}</td>{isAdmin&&<td className="hours shopper-hours">{displayHours(weeklyHours)} h</td>}</tr>})}</tbody></table></div></>
+            <div className="shopper-table-view-bar"><span>{showShopperHours?"Mostrando las horas de cada turno":"Mostrando los códigos de turno"}</span><button type="button" className={`view-hours-action${showShopperHours?" active":""}`} onClick={()=>setShowShopperHours(value=>!value)}>{showShopperHours?"Ocultar horario":"◷ Ver horario"}</button></div>
+            <div className={`table-wrap shopper-scalable${visible.length>20?" shopper-table-compact":""}`}><table><thead><tr><th>{shopperCategory==="purchase"?"Asesor de compra":"Repartidor"}</th>{days.map(d=><th key={d}>{d}</th>)}<th>Aperturas</th><th>Cierres</th>{isAdmin&&<th>Horas</th>}</tr></thead><tbody>{visible.map((staff,rowIndex)=>{const weeklyTurns=dateKeys.map(d=>shopperTurns.find(t=>t.staff_id===staff.id&&t.work_date===d));const weekly=weeklyTurns.map(turn=>turn?.turn_code||"");const weeklyTypes=weeklyTurns.map(turn=>shopperShiftFor(turn?.turn_code||"",staff.location_id,turn?.shift_type_id));const weeklyHours=weeklyTypes.reduce((total,type)=>total+shopperShiftHours(type),0);return <tr key={staff.id}><td><div className="person"><span className="avatar">{staff.name.split(" ").map(x=>x[0]).join("").slice(0,2)}</span><div className="person-info"><div className="shopper-name-line"><strong className="shopper-name-text">{staff.name}</strong><div className="shopper-row-actions"><button className="shopper-action edit" onClick={()=>setEditShopper(staff)} title={`Editar a ${staff.name}`} aria-label={`Editar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l11-11-4-4L4 16v4Zm12.2-16.2 4 4 1.1-1.1a1.4 1.4 0 0 0 0-2l-2-2a1.4 1.4 0 0 0-2 0l-1.1 1.1Z"/></svg></button><button className="shopper-action delete" onClick={()=>setDeleteShopper(staff)} title={`Eliminar a ${staff.name}`} aria-label={`Eliminar a ${staff.name}`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8l1 2h4v2H3V5h4l1-2Zm-2 6h12l-1 12H7L6 9Zm4 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z"/></svg></button></div></div><small>{staff.employment_type} · {staff.location_name} <span className="shopper-inline-id">ID {staff.shopper_external_id||"—"}</span></small></div></div></td>{dateKeys.map((d,i)=><td key={d} data-fill-kind="shopper" data-fill-row={rowIndex} data-fill-day={i}><div className={`fillable-cell${fillCellClass("shopper",rowIndex,i)}`}><button className={`turn-code turn-${weekly[i]||"empty"}${showShopperHours&&weekly[i]?" hours-view":""}`} onClick={()=>openShopperTurnModal(staff,d)}>{weekly[i]?(showShopperHours?shopperShiftSchedule(weeklyTypes[i],weekly[i]):weekly[i]):"＋"}</button>{weekly[i]&&<button type="button" className="fill-handle" aria-label={`Copiar el turno de ${staff.name} en varias celdas`} title="Arrastra en cualquier dirección para copiar" onClick={event=>event.stopPropagation()} onPointerDown={event=>beginFillDrag("shopper",rowIndex,i,event)} onPointerMove={moveFillDrag} onPointerUp={event=>void endFillDrag(event)} onPointerCancel={cancelFillDrag} />}</div></td>)}<td className="hours">{weeklyTypes.filter(t=>t?.counts_opening).length}</td><td className="hours">{weeklyTypes.filter(t=>t?.counts_closing).length}</td>{isAdmin&&<td className="hours shopper-hours">{displayHours(weeklyHours)} h</td>}</tr>})}</tbody></table></div></>
           })()}</>:<div className="shopper-directory">
             <div className="directory-heading"><div><h2>Repositorio de shoppers</h2><p>Busca por ID o nombre y administra el local asignado.</p></div><span>{shopperDirectory.length} registros</span></div>
             <label className="shopper-id-search"><span>⌕</span><input value={shopperDirectoryQuery} onChange={event=>setShopperDirectoryQuery(event.target.value)} placeholder="Buscar por ID de shopper o nombre…" /></label>
@@ -1240,10 +1250,10 @@ export default function Home() {
         {active === "Calificación administrador" && data && <AdministratorRatings locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
         {active === "Constancias" && data && <Constancias locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
         {active === "Autorizaciones" && data && <Authorizations locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
-        {active === "Cumplimiento semanal" && data && <WeeklyCompliance locations={data.locations} supervisors={data.supervisors} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
+        {active === "Cumplimiento semanal" && data && <WeeklyCompliance locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
 
         {active === "Reportes" && <section className="management-card">
-          <div className="management-head"><div><h2>Reporte de asesores de compra</h2><p>Genera el libro Excel 97-2003 con ID, mes, día, horas y día libre.</p></div><button className="primary" onClick={downloadShopperReport}>⇩ Generar Excel</button></div>
+          <div className="management-head"><div><h2>Asignación automática de compra</h2><p>Genera la asignación automática de compra en Excel con ID, mes, día, horas y día libre.</p></div><button className="primary" onClick={downloadShopperReport}>⇩ Descargar asignación</button></div>
           <div className="report-filters">
             <label>Local<select value={reportLocation} onChange={e=>setReportLocation(e.target.value)}>{isAdmin && <option value="">Seleccionar local</option>}{data?.locations.map(l=><option key={l.id} value={l.name}>{l.name} · {l.city}</option>)}</select></label>
             <label>Desde<input type="date" min={SCHEDULE_MIN_DATE} max={SCHEDULE_MAX_DATE} value={reportStart} onChange={e=>setReportStart(e.target.value)} /></label>
