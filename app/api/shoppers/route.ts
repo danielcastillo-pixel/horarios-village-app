@@ -135,10 +135,16 @@ export async function POST(request:NextRequest){
     if(error)return NextResponse.json({error:databaseError(error,"No se pudo guardar el turno")},{status:400});
     return NextResponse.json({ok:true,turn:savedTurn});
   }else if(body.action==="fillTurns"){
-    const staffIds=[...new Set((Array.isArray(body.staffIds)?body.staffIds:[]).map(Number).filter(Number.isFinite))];
-    const workDate=String(body.workDate||""),shiftTypeId=Number(body.shiftTypeId);
-    if(!staffIds.length||staffIds.length>200)return NextResponse.json({error:"Selecciona entre 1 y 200 filas para copiar"},{status:400});
-    if(invalidDate(workDate))return NextResponse.json({error:`La fecha debe estar entre ${SCHEDULE_MIN_DATE} y ${SCHEDULE_MAX_DATE}`},{status:400});
+    const legacyDate=String(body.workDate||"");
+    const rawCells=Array.isArray(body.cells)?body.cells:[];
+    const cellMap=new Map<string,{staffId:number;workDate:string}>();
+    (rawCells.length?rawCells:(Array.isArray(body.staffIds)?body.staffIds:[]).map((staffId:unknown)=>({staffId,workDate:legacyDate}))).forEach((cell:any)=>{
+      const staffId=Number(cell.staffId),workDate=String(cell.workDate||"");
+      if(Number.isFinite(staffId))cellMap.set(`${staffId}-${workDate}`,{staffId,workDate});
+    });
+    const cells=[...cellMap.values()],staffIds=[...new Set(cells.map(cell=>cell.staffId))],shiftTypeId=Number(body.shiftTypeId);
+    if(!cells.length||cells.length>500)return NextResponse.json({error:"Selecciona entre 1 y 500 celdas para copiar"},{status:400});
+    if(cells.some(cell=>invalidDate(cell.workDate)))return NextResponse.json({error:`Todas las fechas deben estar entre ${SCHEDULE_MIN_DATE} y ${SCHEDULE_MAX_DATE}`},{status:400});
     if(!Number.isInteger(shiftTypeId))return NextResponse.json({error:"El turno que quieres copiar no es válido"},{status:400});
     const {data:staff,error:staffError}=await db.from("shopper_staff").select("id,category,location_id").in("id",staffIds).eq("active",true);
     if(staffError)return NextResponse.json({error:databaseError(staffError,"No se pudo validar a los shoppers")},{status:400});
@@ -148,7 +154,7 @@ export async function POST(request:NextRequest){
     const selectedShift=shiftTypes?.[0];
     const invalidStaff=(staff||[]).find((person:any)=>!selectedShift||(selectedShift.category!=="both"&&selectedShift.category!==person.category)||(selectedShift.location_id!==null&&Number(selectedShift.location_id)!==Number(person.location_id)));
     if(invalidStaff||!selectedShift)return NextResponse.json({error:"El turno no pertenece a tu cuenta o no está disponible para todas las filas"},{status:400});
-    const rows=staffIds.map(staffId=>({staff_id:staffId,work_date:workDate,turn_code:selectedShift.code,shift_type_id:selectedShift.id,updated_at:new Date().toISOString()}));
+    const rows=cells.map(cell=>({staff_id:cell.staffId,work_date:cell.workDate,turn_code:selectedShift.code,shift_type_id:selectedShift.id,updated_at:new Date().toISOString()}));
     const {error}=await db.from("shopper_turns").upsert(rows,{onConflict:"staff_id,work_date"});
     if(error)return NextResponse.json({error:databaseError(error,"No se pudo copiar el turno")},{status:400});
     return NextResponse.json({ok:true,copied:rows.length});
@@ -166,5 +172,3 @@ export async function POST(request:NextRequest){
   }else return NextResponse.json({error:"Acción desconocida"},{status:400});
   return NextResponse.json({ok:true});
 }
-
-// Cloudflare deployment trigger for repeated shift codes.
