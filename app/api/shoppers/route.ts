@@ -151,3 +151,5 @@ export async function POST(request:NextRequest){
   }else return NextResponse.json({error:"Acción desconocida"},{status:400});
   return NextResponse.json({ok:true});
 }
+
+// Cloudflare deployment trigger for repeated shift codes.
