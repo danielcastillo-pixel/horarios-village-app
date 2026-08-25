@@ -43,6 +43,7 @@ const adminNav = [
 ];
 const supervisorNav = [["▣", "Horarios"],["◫", "Turnos y roles"],["♟", "Shoppers"],["★", "Calificación administrador"],["▧", "Constancias"],["✓", "Cumplimiento semanal"],["$", "Autorizaciones"],["▥", "Reportes"]];
 const navigationLabel = (label:string) => label === "Horarios" ? "Horario Supervisor" : label === "Shoppers" ? "Horario Shoppers" : label === "Reportes" ? "Asignación automática de compra" : label;
+const navigationMenuLabel = (label:string) => label === "Reportes" ? "Asignación de compra" : navigationLabel(label);
 const navigationIconPaths:Record<string,string[]> = {
   "Panel general":["M3 11.5 12 4l9 7.5","M5.5 10.5V20h13v-9.5","M9.5 20v-6h5v6"],
   "Horarios":["M4 5h16v15H4z","M8 3v4M16 3v4M4 9h16","M8 13h2M14 13h2M8 17h2M14 17h2"],
@@ -1148,7 +1149,7 @@ export default function Home() {
           </div>
           <strong>Región Sur</strong>
         </div>
-        <nav>{visibleNav.map(([,label]) => <button key={label} title={sidebarCollapsed?navigationLabel(label):undefined} className={active === label ? "active" : ""} onClick={() => {setActive(label);setMobileMenuOpen(false)}}><i><NavigationIcon label={label} /></i><span>{navigationLabel(label)}</span></button>)}</nav>
+        <nav>{visibleNav.map(([,label]) => <button key={label} title={sidebarCollapsed?navigationMenuLabel(label):undefined} className={active === label ? "active" : ""} onClick={() => {setActive(label);setMobileMenuOpen(false)}}><i><NavigationIcon label={label} /></i><span>{navigationMenuLabel(label)}</span></button>)}</nav>
         <div className="profile"><div className="avatar admin">{data?.currentUser.name.split(" ").map(x=>x[0]).join("").slice(0,2).toUpperCase()}</div><div><strong>{data?.currentUser.name}</strong><span>{isAdmin?"Administrador total":"Supervisor de local"}</span></div></div>
         <button className="logout" onClick={() => void signOutSafely()}><i><NavigationIcon label="Cerrar sesión" /></i><span>Cerrar sesión</span></button>
         {isAdmin && <button className="settings" onClick={() => {setActive("Configuración");setMobileMenuOpen(false)}}><i><NavigationIcon label="Configuración" /></i><span>Configuración</span></button>}
