@@ -20,8 +20,8 @@ type CurrentUser = { email:string; name:string; role:"admin"|"supervisor"; locat
 type DataSet = { locations:LocationRow[]; roles:RoleRow[]; supervisors:SupervisorRow[]; assignments:AssignmentRow[]; currentUser:CurrentUser };
 type AccessUserRow = { id:string; email:string; name:string; role:string; location_id:number; location_name:string; location_ids:number[]; location_names:string[]; requested_location_ids:number[]; requested_location_names:string[]; active:number };
 type ShopperRow={id:number;name:string;shopper_external_id:string|null;category:"purchase"|"delivery";employment_type:string;location_id:number;location_name:string;active:number};
-type ShopperTurnRow={id:number;staff_id:number;work_date:string;turn_code:string};
-type ShopperShiftType={id:number;code:string;label:string;start_time:string|null;end_time:string|null;category:"purchase"|"delivery"|"both";location_id:number|null;counts_opening:boolean;counts_closing:boolean;is_free:boolean};
+type ShopperTurnRow={id:number;staff_id:number;work_date:string;turn_code:string;shift_type_id:number|null};
+type ShopperShiftType={id:number;code:string;label:string;start_time:string|null;end_time:string|null;category:"purchase"|"delivery"|"both";location_id:number|null;counts_opening:boolean;counts_closing:boolean;is_free:boolean;created_by:string|null;is_general:boolean};
 type PresenceType="supervisor"|"purchase"|"delivery";
 type PresenceRow={key:string;name:string;initials:string;kind:PresenceType;role:string;start:string;end:string;active:boolean;minutesUntil:number};
 type FillKind="supervisor"|"shopper";
@@ -548,23 +548,24 @@ export default function Home() {
     const source=visible[drag.sourceIndex];
     const targets=visible.slice(drag.sourceIndex+1,drag.targetIndex+1);
     const workDate=dateKeys[drag.day];
-    const turnCode=shopperTurns.find(turn=>turn.staff_id===source?.id&&turn.work_date===workDate)?.turn_code;
-    if(!source||!turnCode||!targets.length)return;
+    const sourceTurn=shopperTurns.find(turn=>turn.staff_id===source?.id&&turn.work_date===workDate);
+    if(!source||!sourceTurn?.turn_code||!sourceTurn.shift_type_id||!targets.length)return;
+    const turnCode=sourceTurn.turn_code,shiftTypeId=sourceTurn.shift_type_id;
     const overwriteCount=targets.filter(staff=>shopperTurns.some(turn=>turn.staff_id===staff.id&&turn.work_date===workDate)).length;
     if(overwriteCount&&!window.confirm(`Se reemplazarán ${overwriteCount} turno${overwriteCount===1?"":"s"} existente${overwriteCount===1?"":"s"}. ¿Continuar?`))return;
     const mutationVersion=beginShopperMutation();
     if(mutationVersion===null)return;
     const targetIds=new Set(targets.map(staff=>staff.id));
     setShopperTurns(current=>{
-      const next=current.map(turn=>targetIds.has(turn.staff_id)&&turn.work_date===workDate?{...turn,turn_code:turnCode}:turn);
+      const next=current.map(turn=>targetIds.has(turn.staff_id)&&turn.work_date===workDate?{...turn,turn_code:turnCode,shift_type_id:shiftTypeId}:turn);
       const existing=new Set(next.filter(turn=>turn.work_date===workDate).map(turn=>turn.staff_id));
-      targets.forEach((staff,index)=>{if(!existing.has(staff.id))next.push({id:-(Date.now()+index),staff_id:staff.id,work_date:workDate,turn_code:turnCode});});
+      targets.forEach((staff,index)=>{if(!existing.has(staff.id))next.push({id:-(Date.now()+index),staff_id:staff.id,work_date:workDate,turn_code:turnCode,shift_type_id:shiftTypeId});});
       return next;
     });
     setNotice(`Copiando turno a ${targets.length} shopper${targets.length===1?"":"s"}…`);
     try{
       const response=await apiFetch("/api/shoppers",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
-        action:"fillTurns",staffIds:targets.map(staff=>staff.id),workDate,turnCode
+        action:"fillTurns",staffIds:targets.map(staff=>staff.id),workDate,shiftTypeId
       })});
       const result=await response.json().catch(()=>({error:"No se pudo copiar el turno"})) as {copied?:number;error?:string};
       if(mutationVersion!==shopperMutationVersionRef.current)return;
@@ -833,10 +834,11 @@ export default function Home() {
     })});
     const result=await response.json().catch(()=>({error:"No se pudo crear el turno"}));
     if(!response.ok){setNotice(`Error: ${result.error}`);return;}
-    setAddShopperShift(false);setNotice(result.updated?"✓ Turno actualizado para este local":"✓ Nuevo turno creado para este local");await loadShoppers();
+    setAddShopperShift(false);setNotice(result.updated?"✓ Tu turno fue actualizado":"✓ Turno privado creado para tu cuenta");await loadShoppers();
   }
 
-  function shopperShiftFor(code:string,locationId?:number){
+  function shopperShiftFor(code:string,locationId?:number,shiftTypeId?:number|null){
+    if(shiftTypeId){const exact=shopperShiftTypes.find(shift=>shift.id===shiftTypeId);if(exact)return exact;}
     return shopperShiftTypes.find(s=>s.code===code&&s.location_id===locationId)
       ?? shopperShiftTypes.find(s=>s.code===code&&s.location_id===null)
       ?? shopperShiftTypes.find(s=>s.code===code);
@@ -859,22 +861,28 @@ export default function Home() {
     return difference/60;
   }
 
-  async function saveShopperTurn(code:string){
+  async function saveShopperTurn(shiftTypeId:number|string){
     if(!shopperModal)return;
+    const selectedId=typeof shiftTypeId==="number"?shiftTypeId:Number.NaN;
+    const code=String(shiftTypeId).trim().toUpperCase();
+    const shiftType=shopperShiftTypes.find(type=>type.id===selectedId&&(type.location_id===null||type.location_id===shopperModal.staff.location_id)&&(type.category==="both"||type.category===shopperModal.staff.category))
+      ??shopperShiftTypes.find(type=>type.code.toUpperCase()===code&&type.location_id===shopperModal.staff.location_id&&(type.category==="both"||type.category===shopperModal.staff.category))
+      ??shopperShiftTypes.find(type=>type.code.toUpperCase()===code&&type.location_id===null&&(type.category==="both"||type.category===shopperModal.staff.category));
+    if(!shiftType){setNotice("Ese turno no pertenece a tu cuenta o no está disponible para el local");return;}
     const mutationVersion=beginShopperMutation();
     if(mutationVersion===null)return;
     const selected={...shopperModal};
     setShopperTurns(current=>{
       const existing=current.find(turn=>turn.staff_id===selected.staff.id&&turn.work_date===selected.date);
       return existing
-        ?current.map(turn=>turn.id===existing.id?{...turn,turn_code:code}:turn)
-        :[...current,{id:-Date.now(),staff_id:selected.staff.id,work_date:selected.date,turn_code:code}];
+        ?current.map(turn=>turn.id===existing.id?{...turn,turn_code:shiftType.code,shift_type_id:shiftType.id}:turn)
+        :[...current,{id:-Date.now(),staff_id:selected.staff.id,work_date:selected.date,turn_code:shiftType.code,shift_type_id:shiftType.id}];
     });
     setShopperModal(null);
     setNotice("Guardando turno…");
     try{
       const response=await apiFetch("/api/shoppers",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
-        action:"saveTurn",staffId:selected.staff.id,workDate:selected.date,turnCode:code
+        action:"saveTurn",staffId:selected.staff.id,workDate:selected.date,shiftTypeId:shiftType.id
       })});
       const result=await response.json().catch(()=>({error:"No se pudo guardar"})) as {error?:string;turn?:ShopperTurnRow};
       if(mutationVersion!==shopperMutationVersionRef.current)return;
@@ -1245,7 +1253,11 @@ export default function Home() {
       {editShopper&&<div className="modal-backdrop" onMouseDown={()=>setEditShopper(null)}><form className="modal" onSubmit={e=>{e.preventDefault();void updateShopper(new FormData(e.currentTarget));}} onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" onClick={()=>setEditShopper(null)}>×</button><span className="modal-kicker">DATOS INTERNOS</span><h2>{editShopper.name}</h2><p>El ID aparece de forma compacta junto a sus datos y también se conserva en el reporte.</p><label>Nombre completo<input name="name" required defaultValue={editShopper.name} /></label><label>ID de shopper<input name="shopperId" inputMode="numeric" required defaultValue={editShopper.shopper_external_id||""} /></label><label>Local asignado<select name="locationId" required defaultValue={editShopper.location_id}>{data?.locations.map(item=><option key={item.id} value={item.id}>{item.name} · {item.city}</option>)}</select></label><button className="primary save">Guardar cambios</button></form></div>}
       {deleteShopper&&<div className="modal-backdrop" onMouseDown={()=>!deletingShopper&&setDeleteShopper(null)}><div className="modal confirm-delete-modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-shopper-title" onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" disabled={deletingShopper} onClick={()=>setDeleteShopper(null)}>×</button><span className="delete-warning-icon">!</span><span className="modal-kicker">ELIMINAR DEL HORARIO</span><h2 id="delete-shopper-title">¿Eliminar a {deleteShopper.name}?</h2><p>¿Estás seguro de que quieres eliminar a este shopper del horario? Se eliminará toda su fila y los turnos asignados. Esta acción no elimina usuarios de acceso ni otros locales.</p><div className="confirm-actions"><button type="button" className="secondary" disabled={deletingShopper} onClick={()=>setDeleteShopper(null)}>Cancelar</button><button type="button" className="danger-button" disabled={deletingShopper} onClick={()=>void confirmDeleteShopper()}>{deletingShopper?"Eliminando…":"Sí, eliminar shopper"}</button></div></div></div>}
       {addShopperShift&&<div className="modal-backdrop" onMouseDown={()=>setAddShopperShift(false)}><form className="modal shift-type-editor" onSubmit={e=>{e.preventDefault();void createShopperShift(new FormData(e.currentTarget));}} onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" onClick={()=>setAddShopperShift(false)}>×</button><span className="modal-kicker">NUEVO TURNO</span><h2>Crear turno de shoppers</h2><p>La misma sigla puede tener horarios diferentes en cada local.</p><label>Local<select name="locationId" required defaultValue={data?.locations.find(l=>l.name===location)?.id??""}><option value="" disabled>Selecciona el local</option>{data?.locations.map(l=><option key={l.id} value={l.id}>{l.name} · {l.city}</option>)}</select></label><div className="time-row"><label>Código<input name="code" required maxLength={6} placeholder="A" /></label><label>Nombre<input name="label" required placeholder="Apertura" /></label></div><div className="time-row"><label>Hora de inicio<input name="start" type="time" defaultValue="06:00" /></label><label>Hora de fin<input name="end" type="time" defaultValue="14:00" /></label></div><label>Disponible para<select name="category" defaultValue={shopperCategory}><option value="purchase">Asesores de compra</option><option value="delivery">Repartidores</option><option value="both">Ambos</option></select></label><fieldset className="shift-flags"><legend>Clasificación</legend><label><input type="checkbox" name="countsOpening" /> Cuenta como apertura</label><label><input type="checkbox" name="countsClosing" /> Cuenta como cierre</label><label><input type="checkbox" name="isFree" /> Es libre o vacaciones</label></fieldset><button className="primary save">Crear o actualizar turno</button></form></div>}
-      {shopperModal&&<div className="modal-backdrop" onMouseDown={()=>setShopperModal(null)}><div className="modal turn-modal shopper-turn-combo" onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" onClick={()=>setShopperModal(null)}>×</button><span className="modal-kicker">ASIGNAR TURNO</span><h2>{shopperModal.staff.name}</h2><p>{shopperModal.date} · {shopperModal.staff.location_name}</p><label className="turn-search-label">Escribe o selecciona el turno<div className="turn-search-input"><input autoFocus value={shopperTurnInput} onChange={e=>setShopperTurnInput(e.target.value.toUpperCase())} onKeyDown={e=>{if(e.key!=="Enter")return;e.preventDefault();const code=shopperTurnInput.trim().toUpperCase();const valid=shopperShiftTypes.some(type=>(type.location_id===null||type.location_id===shopperModal.staff.location_id)&&(type.category==="both"||type.category===shopperModal.staff.category)&&type.code.toUpperCase()===code);if(valid)void saveShopperTurn(code);else setNotice("Turno no registrado para este local");}} placeholder="Escribe A, T, L…" maxLength={6}/><kbd>↵</kbd></div></label><small className="turn-search-help">Escribe el código y presiona Enter, o toca una opción.</small><div className="turn-options">{shopperShiftTypes.filter(type=>(type.location_id===null||type.location_id===shopperModal.staff.location_id)&&(type.category==="both"||type.category===shopperModal.staff.category)&&(!shopperTurnInput.trim()||type.code.toLowerCase().includes(shopperTurnInput.trim().toLowerCase())||type.label.toLowerCase().includes(shopperTurnInput.trim().toLowerCase()))).map(type=><button key={`${type.id}-${type.code}`} onClick={()=>void saveShopperTurn(type.code)}><strong>{type.code}</strong><span>{type.start_time&&type.end_time?`${type.start_time.slice(0,5)}–${type.end_time.slice(0,5)} · `:""}{shopperShiftLabel(type)}</span></button>)}</div>{shopperShiftTypes.filter(type=>(type.location_id===null||type.location_id===shopperModal.staff.location_id)&&(type.category==="both"||type.category===shopperModal.staff.category)&&(!shopperTurnInput.trim()||type.code.toLowerCase().includes(shopperTurnInput.trim().toLowerCase())||type.label.toLowerCase().includes(shopperTurnInput.trim().toLowerCase()))).length===0&&<div className="turn-search-empty"><strong>Turno no registrado</strong><span>Prueba con otro código disponible para este local.</span></div>}</div></div>}
+      {shopperModal&&(()=>{
+        const available=shopperShiftTypes.filter(type=>(type.location_id===null||type.location_id===shopperModal.staff.location_id)&&(type.category==="both"||type.category===shopperModal.staff.category));
+        const matches=available.filter(type=>!shopperTurnInput.trim()||type.code.toLowerCase().includes(shopperTurnInput.trim().toLowerCase())||type.label.toLowerCase().includes(shopperTurnInput.trim().toLowerCase()));
+        return <div className="modal-backdrop" onMouseDown={()=>setShopperModal(null)}><div className="modal turn-modal shopper-turn-combo" onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" onClick={()=>setShopperModal(null)}>×</button><span className="modal-kicker">ASIGNAR TURNO</span><h2>{shopperModal.staff.name}</h2><p>{shopperModal.date} · {shopperModal.staff.location_name}</p><label className="turn-search-label">Escribe o selecciona el turno<div className="turn-search-input"><input autoFocus value={shopperTurnInput} onChange={e=>setShopperTurnInput(e.target.value.toUpperCase())} onKeyDown={e=>{if(e.key!=="Enter")return;e.preventDefault();const code=shopperTurnInput.trim().toUpperCase();const selected=available.find(type=>type.code.toUpperCase()===code);if(selected)void saveShopperTurn(selected.id);else setNotice("Turno no registrado para este local");}} placeholder="Escribe A, T, L…" maxLength={6}/><kbd>↵</kbd></div></label><small className="turn-search-help">Escribe el código y presiona Enter, o toca una opción.</small><div className="turn-options">{matches.map(type=><button key={`${type.id}-${type.code}`} onClick={()=>void saveShopperTurn(type.id)}><strong>{type.code}</strong><span>{type.start_time&&type.end_time?`${type.start_time.slice(0,5)}–${type.end_time.slice(0,5)} · `:""}{shopperShiftLabel(type)}</span></button>)}</div>{matches.length===0&&<div className="turn-search-empty"><strong>Turno no registrado</strong><span>Prueba con otro código disponible para este local.</span></div>}</div></div>;
+      })()}
       {editAccessUser && <div className="modal-backdrop" onMouseDown={()=>setEditAccessUser(null)}><form className="modal access-editor" onSubmit={e=>{e.preventDefault();void updateAccessUser(new FormData(e.currentTarget));}} onMouseDown={e=>e.stopPropagation()}>
         <button type="button" className="close" onClick={()=>setEditAccessUser(null)}>×</button>
         <span className="modal-kicker">EDITAR ACCESO</span>
