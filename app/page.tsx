@@ -1249,7 +1249,7 @@ export default function Home() {
         {active === "Calificación administrador" && data && <AdministratorRatings locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
         {active === "Constancias" && data && <Constancias locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
         {active === "Autorizaciones" && data && <Authorizations locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
-        {active === "Cumplimiento semanal" && data && <WeeklyCompliance locations={data.locations} supervisors={data.supervisors} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
+        {active === "Cumplimiento semanal" && data && <WeeklyCompliance locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
 
         {active === "Reportes" && <section className="management-card">
           <div className="management-head"><div><h2>Reporte de asesores de compra</h2><p>Genera el libro Excel 97-2003 con ID, mes, día, horas y día libre.</p></div><button className="primary" onClick={downloadShopperReport}>⇩ Generar Excel</button></div>
