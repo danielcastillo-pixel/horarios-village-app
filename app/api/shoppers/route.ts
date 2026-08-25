@@ -82,7 +82,6 @@ export async function POST(request:NextRequest){
     const category=["purchase","delivery","both"].includes(body.category)?body.category:null;
     const locationId=Number(body.locationId);
     if(!/^[A-Z0-9_-]{1,6}$/.test(code))return NextResponse.json({error:"El código debe tener entre 1 y 6 letras o números"},{status:400});
-    if(["A","B","T","L","V"].includes(code))return NextResponse.json({error:`El turno ${code} ya es un turno general disponible para todos`},{status:400});
     if(!label)return NextResponse.json({error:"Escribe el nombre del turno"},{status:400});
     if(!category)return NextResponse.json({error:"La categoría del turno no es válida"},{status:400});
     if(!Number.isFinite(locationId)||locationId<=0)return NextResponse.json({error:"Selecciona el local al que pertenece el turno"},{status:400});
