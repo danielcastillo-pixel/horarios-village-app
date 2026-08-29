@@ -160,6 +160,7 @@ export default function Home() {
   const [reportEnd, setReportEnd] = useState("2026-07-31");
   const [accessState, setAccessState] = useState<"loading"|"authorized"|"signin"|"denied">("loading");
   const [accessUsers, setAccessUsers] = useState<AccessUserRow[]>([]);
+  const [accessFilter,setAccessFilter]=useState<"pending"|"active"|"inactive">("pending");
   const [editAccessUser, setEditAccessUser] = useState<AccessUserRow | null>(null);
   const [editAccessLocations, setEditAccessLocations] = useState<number[]>([]);
   const [resettingAccessId,setResettingAccessId]=useState<string|null>(null);
@@ -1067,10 +1068,9 @@ export default function Home() {
     if(resettingAccessId)return;
     if(!window.confirm(`¿Generar una contraseña temporal para ${user.name}? La contraseña actual dejará de funcionar.`))return;
     setResettingAccessId(user.id);
-    const response=await apiFetch("/api/access",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"resetPassword",id:user.id})});
-    const result=await response.json().catch(()=>({error:"No se pudo restablecer la contraseña"})) as {error?:string;temporaryPassword?:string};
+    const {data:result,error}=await supabase.functions.invoke("password-management",{body:{action:"reset-user",userId:user.id}});
     setResettingAccessId(null);
-    if(!response.ok||!result.temporaryPassword){setNotice(`Error: ${result.error??"No se pudo restablecer la contraseña"}`);return;}
+    if(error||!result?.temporaryPassword){setNotice(`Error: ${result?.error??error?.message??"No se pudo restablecer la contraseña"}`);return;}
     setTemporaryAccess({name:user.name,email:user.email,password:result.temporaryPassword});
   }
 
@@ -1082,10 +1082,11 @@ export default function Home() {
     if(password.length<8){setLoginError("La nueva contraseña debe tener al menos 8 caracteres.");return;}
     if(password!==confirmation){setLoginError("Las contraseñas no coinciden.");return;}
     setChangingPassword(true);
-    const response=await apiFetch("/api/access",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"changeOwnPassword",password})});
-    const result=await response.json().catch(()=>({error:"No se pudo cambiar la contraseña"})) as {error?:string};
+    const {error:updateError}=await supabase.auth.updateUser({password});
+    if(updateError){setChangingPassword(false);setLoginError(updateError.message||"No se pudo cambiar la contraseña.");return;}
+    const {data:result,error:completeError}=await supabase.functions.invoke("password-management",{body:{action:"complete-change"}});
     setChangingPassword(false);
-    if(!response.ok){setLoginError(result.error??"No se pudo cambiar la contraseña.");return;}
+    if(completeError||!result?.ok){setLoginError(result?.error??completeError?.message??"La contraseña cambió, pero no se pudo finalizar el proceso. Intenta guardar nuevamente.");return;}
     await supabase.auth.refreshSession();
     setMustChangePassword(false);
     setNotice("✓ Contraseña personal guardada correctamente");
@@ -1112,7 +1113,8 @@ export default function Home() {
     setLoginError("");
     if(!loginEmail){setLoginError("Escribe el correo de tu cuenta.");return;}
     setSendingRecovery(true);
-    const {error}=await supabase.auth.resetPasswordForEmail(loginEmail,{redirectTo:window.location.origin});
+    const redirectTo=`${window.location.origin}/?password_recovery=1`;
+    const {error}=await supabase.auth.resetPasswordForEmail(loginEmail,{redirectTo});
     setSendingRecovery(false);
     if(error){setLoginError(error.message.includes("rate limit")?"Se enviaron demasiadas solicitudes. Espera unos minutos e inténtalo nuevamente.":"No se pudo enviar el enlace. Revisa el correo e inténtalo nuevamente.");return;}
     setLoginError("✓ Si el correo está registrado, recibirás un enlace para crear una contraseña nueva.");
@@ -1125,6 +1127,10 @@ export default function Home() {
 
   const isAdmin = data?.currentUser.role === "admin";
   const visibleNav = isAdmin ? adminNav : supervisorNav;
+  const pendingAccessUsers=accessUsers.filter(user=>user.active===0&&!user.location_ids.length);
+  const activeAccessUsers=accessUsers.filter(user=>user.active===1);
+  const inactiveAccessUsers=accessUsers.filter(user=>user.active===0&&user.location_ids.length>0);
+  const visibleAccessUsers=accessFilter==="pending"?pendingAccessUsers:accessFilter==="active"?activeAccessUsers:inactiveAccessUsers;
 
   return (
     <main className={`app-shell ${sidebarCollapsed?"sidebar-collapsed":""}`}>
@@ -1263,23 +1269,28 @@ export default function Home() {
         </section>}
 
         {active === "Accesos" && isAdmin && <section className="management-card">
-          <div className="management-head"><div><h2>Administración de accesos</h2><p>Registra previamente a cada supervisor y asígnalo a un solo local.</p></div><span className="admin-lock">Administrador: solo tú</span></div>
+          <div className="management-head"><div><h2>Administración de accesos</h2><p>Aprueba solicitudes, administra usuarios activos y reactiva accesos inactivos.</p></div><span className="admin-lock">Administrador: solo tú</span></div>
           <form className="access-form" onSubmit={e=>{e.preventDefault();void saveAccessUser(new FormData(e.currentTarget));e.currentTarget.reset();}}>
             <label>Nombre completo<input name="name" required placeholder="Nombre del supervisor" /></label>
             <label>Correo de acceso<input name="email" type="email" required placeholder="usuario@correo.com" /></label>
             <label>Locales permitidos<select name="locationIds" required multiple size={4}>{data?.locations.map(l=><option key={l.id} value={l.id}>{l.name} · {l.city}</option>)}</select><small>Usa Ctrl para elegir varios</small></label>
             <button className="primary">＋ Registrar usuario</button>
           </form>
+          <div className="access-tabs" role="tablist" aria-label="Estado de usuarios">
+            <button type="button" className={accessFilter==="pending"?"active":""} onClick={()=>setAccessFilter("pending")}>Pendientes <b>{pendingAccessUsers.length}</b></button>
+            <button type="button" className={accessFilter==="active"?"active":""} onClick={()=>setAccessFilter("active")}>Activos <b>{activeAccessUsers.length}</b></button>
+            <button type="button" className={accessFilter==="inactive"?"active":""} onClick={()=>setAccessFilter("inactive")}>Inactivos <b>{inactiveAccessUsers.length}</b></button>
+          </div>
           <div className="access-list">
             <div className="access-row access-head"><span>Usuario</span><span>Correo</span><span>Local permitido</span><span>Acciones</span></div>
-            {accessUsers.length ? accessUsers.map(user=>{const pending=user.active===0&&!user.location_ids.length;return <div className={`access-row ${pending?"pending-access":""}`} key={user.id}>
-              <strong>{user.name}{pending&&<small className="pending-badge">Pendiente</small>}</strong><span>{user.email}</span><span>{pending&&user.requested_location_names.length ? `Solicita: ${user.requested_location_names.join(", ")}` : user.location_names.length ? user.location_names.join(", ") : "Sin asignar"}</span>
+            {visibleAccessUsers.length ? visibleAccessUsers.map(user=>{const pending=user.active===0&&!user.location_ids.length;return <div className={`access-row ${pending?"pending-access":""}`} key={user.id}>
+              <strong>{user.name}{pending?<small className="pending-badge">Pendiente</small>:user.active===1?<small className="active-badge">Activo</small>:<small className="inactive-badge">Inactivo</small>}</strong><span>{user.email}</span><span>{pending&&user.requested_location_names.length ? `Solicita: ${user.requested_location_names.join(", ")}` : user.location_names.length ? user.location_names.join(", ") : "Sin asignar"}</span>
               <div className="access-actions">
                 <button className="access-edit" onClick={()=>{setEditAccessUser(user);setEditAccessLocations(user.location_ids.length?user.location_ids:user.requested_location_ids)}}>{pending?"Revisar solicitud":"Editar"}</button>
                 {!pending&&<button className="access-reset" disabled={resettingAccessId===user.id} onClick={()=>void resetAccessPassword(user)}>{resettingAccessId===user.id?"Generando…":"Restablecer clave"}</button>}
                 {!pending&&<button className={user.active===1?"access-active":"access-blocked"} onClick={()=>void toggleAccessUser(user)}>{user.active===1?"Bloquear":"Reactivar"}</button>}
               </div>
-            </div>}) : <div className="empty-report">Todavía no has registrado supervisores con acceso.</div>}
+            </div>}) : <div className="empty-report">{accessFilter==="pending"?"No existen solicitudes pendientes.":accessFilter==="active"?"No existen usuarios activos.":"No existen usuarios inactivos."}</div>}
           </div>
         </section>}
 
