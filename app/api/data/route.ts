@@ -104,9 +104,8 @@ export async function POST(request:NextRequest) {
   else if(body.action==="addLocation") result=await db.from("locations").insert({name:String(body.name).trim(),city:String(body.city).trim()});
   else if(body.action==="addSupervisor"){
     const activeFrom=isDate(body.weekStart)?String(body.weekStart):"2026-07-27";
-    const activeUntil=isDate(body.weekEnd)?String(body.weekEnd):moveDate(activeFrom,6);
     result=await db.from("supervisors").insert({
-      name:String(body.name).trim(),location_id:body.locationId,active:true,active_from:activeFrom,active_until:activeUntil
+      name:String(body.name).trim(),location_id:body.locationId,active:true,active_from:activeFrom,active_until:null
     });
   }
   else if(body.action==="addRole") result=await db.from("roles").insert({name:String(body.name).trim(),color:body.color,counts_hours:!["Descanso","Libre","Vacaciones"].includes(String(body.name))});
@@ -129,7 +128,7 @@ export async function POST(request:NextRequest) {
     const sourceStart=String(body.sourceStart),targetStart=String(body.targetStart);
     if(!isDate(sourceStart)||!isDate(targetStart))return NextResponse.json({error:"La semana seleccionada no es válida"},{status:400});
     const sourceEnd=moveDate(sourceStart,6),targetEnd=moveDate(targetStart,6);
-    const {data:localSupervisors,error:supervisorError}=await db.from("supervisors").select("id,active_until").eq("location_id",body.locationId).lte("active_from",sourceEnd).or(`active_until.is.null,active_until.gte.${sourceStart}`);
+    const {data:localSupervisors,error:supervisorError}=await db.from("supervisors").select("id").eq("location_id",body.locationId).lte("active_from",targetEnd).or(`active_until.is.null,active_until.gte.${targetStart}`);
     if(supervisorError)return NextResponse.json({error:supervisorError.message},{status:400});
     const supervisorIds=(localSupervisors||[]).map((s:any)=>s.id);
     if(!supervisorIds.length)return NextResponse.json({error:"El local no tiene filas de supervisores activas."},{status:400});
@@ -143,11 +142,6 @@ export async function POST(request:NextRequest) {
     if(copied.length){
       const {error:copyError}=await db.from("assignments").upsert(copied,{onConflict:"supervisor_id,work_date"});
       if(copyError)return NextResponse.json({error:copyError.message},{status:400});
-    }
-    const extendIds=(localSupervisors||[]).filter((s:any)=>s.active_until&&s.active_until<=sourceEnd).map((s:any)=>s.id);
-    if(extendIds.length){
-      const {error:extendError}=await db.from("supervisors").update({active:true,active_until:targetEnd}).in("id",extendIds);
-      if(extendError)return NextResponse.json({error:extendError.message},{status:400});
     }
     return NextResponse.json({ok:true,copied:copied.length});
   }
