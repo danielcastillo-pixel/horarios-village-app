@@ -701,7 +701,7 @@ export default function Home() {
     const payload = create === "location"
       ? {action:"addLocation",name:form.get("name"),city:form.get("city")}
       : create === "supervisor"
-      ? {action:"addSupervisor",name:form.get("name"),locationId:Number(form.get("locationId")),weekStart,weekEnd:dateKeys[6]}
+      ? {action:"addSupervisor",name:form.get("name"),locationId:Number(form.get("locationId")),weekStart}
       : {action:"addRole",name:form.get("name"),color:form.get("color")};
     const response = await apiFetch("/api/data",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});
     if (response.ok) {
