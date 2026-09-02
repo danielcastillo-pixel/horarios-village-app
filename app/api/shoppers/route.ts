@@ -1,5 +1,9 @@
 import {NextRequest,NextResponse} from "next/server";
 import {createClient} from "@supabase/supabase-js";
+
+export const dynamic="force-dynamic";
+export const revalidate=0;
+
 const SCHEDULE_MIN_DATE="2026-07-27";
 const SCHEDULE_MAX_DATE=`${Math.max(new Date().getFullYear()+1,2027)}-12-31`;
 function sessionToken(request:NextRequest){return (request.headers.get("x-supabase-token")||"").trim();}
@@ -37,7 +41,7 @@ export async function GET(request:NextRequest){
   if(request.nextUrl.searchParams.get("directory")==="1"){
     const {data,error}=await db.from("shopper_staff").select("*,locations(name)").order("name");
     if(error)return NextResponse.json({error:databaseError(error,"No se pudo cargar el repositorio de shoppers")},{status:400});
-    return NextResponse.json({staff:(data||[]).map((x:any)=>({...x,location_name:x.locations?.name||"",active:x.active?1:0}))});
+    return NextResponse.json({staff:(data||[]).map((x:any)=>({...x,location_name:x.locations?.name||"",active:x.active?1:0}))},{headers:{"Cache-Control":"private, no-store, max-age=0"}});
   }
   const [{data:staff,error},{data:turns,error:te},{data:shiftTypes}]=await Promise.all([
     db.from("shopper_staff").select("*,locations(name)").eq("category",category).eq("active",true).order("name"),
@@ -57,7 +61,7 @@ export async function GET(request:NextRequest){
     staff:(staff||[]).map((x:any)=>({...x,location_name:x.locations?.name||"",active:x.active?1:0})),
     turns:(turns||[]).filter((x:any)=>ids.has(x.staff_id)),
     shiftTypes:shiftTypes?.length?shiftTypes:defaults
-  });
+  },{headers:{"Cache-Control":"private, no-store, max-age=0"}});
 }
 export async function POST(request:NextRequest){
   const auth=await authenticate(request);if(!auth)return NextResponse.json({error:"Sesión no válida"},{status:401});
