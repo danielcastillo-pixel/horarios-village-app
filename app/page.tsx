@@ -9,6 +9,8 @@ import Authorizations from "./Authorizations";
 import WeeklyCompliance from "./WeeklyCompliance";
 import Constancias from "./Constancias";
 import DashboardInsights from "./DashboardInsights";
+import RegionalProfitability from "./RegionalProfitability";
+import RegionalClients from "./RegionalClients";
 
 type Shift = { time: string; role: string; tone: "blue" | "green" | "orange" | "yellow" };
 type Person = { id: number; name: string; location: string; initials: string; shifts: (Shift | null)[] };
@@ -39,9 +41,9 @@ const locations = [
 const shift = (time: string, role: string, tone: Shift["tone"]): Shift => ({ time, role, tone });
 const adminNav = [
   ["▦", "Panel general"], ["▣", "Horarios"], ["♙", "Supervisores"],
-  ["◫", "Turnos y roles"], ["♟", "Shoppers"], ["★", "Calificación administrador"], ["▧", "Constancias"], ["✓", "Cumplimiento semanal"], ["$", "Autorizaciones"], ["⌂", "Locales"], ["▥", "Reportes"], ["⚿", "Accesos"]
+  ["◫", "Turnos y roles"], ["♟", "Shoppers"], ["★", "Calificación administrador"], ["▧", "Constancias"], ["✓", "Cumplimiento semanal"], ["↗", "Rentabilidad ciudades"], ["♙", "Gestión de clientes"], ["$", "Autorizaciones"], ["⌂", "Locales"], ["▥", "Reportes"], ["⚿", "Accesos"]
 ];
-const supervisorNav = [["▣", "Horarios"],["◫", "Turnos y roles"],["♟", "Shoppers"],["★", "Calificación administrador"],["▧", "Constancias"],["✓", "Cumplimiento semanal"],["$", "Autorizaciones"],["▥", "Reportes"]];
+const supervisorNav = [["▣", "Horarios"],["◫", "Turnos y roles"],["♟", "Shoppers"],["★", "Calificación administrador"],["▧", "Constancias"],["✓", "Cumplimiento semanal"],["♙", "Gestión de clientes"],["$", "Autorizaciones"],["▥", "Reportes"]];
 const navigationLabel = (label:string) => label === "Horarios" ? "Horario Supervisor" : label === "Shoppers" ? "Horario Shoppers" : label === "Reportes" ? "Asignación automática de compra" : label;
 const navigationMenuLabel = (label:string) => label === "Reportes" ? "Asignación de compra" : navigationLabel(label);
 const navigationIconPaths:Record<string,string[]> = {
@@ -53,6 +55,8 @@ const navigationIconPaths:Record<string,string[]> = {
   "Calificación administrador":["m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9L6.6 20l1-6.1-4.4-4.3 6.1-.9L12 3Z"],
   "Constancias":["M5 3h14v18H5z","M8 7h8M8 11h8M8 15h5","m15 17 2 2 4-5"],
   "Cumplimiento semanal":["M4 5h16v15H4z","M8 3v4M16 3v4M4 9h16","m8 14 2 2 5-5"],
+  "Rentabilidad ciudades":["M4 20V10h4v10H4ZM10 20V4h4v16h-4ZM16 20V7h4v13h-4Z","m5 7 4-3 4 3 6-5"],
+  "Gestión de clientes":["M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z","M2.5 21a6.5 6.5 0 0 1 13 0","M17 8h5M19.5 5.5v5"],
   "Autorizaciones":["M6 3h12v18H6z","M9 7h6M9 11h6M9 15h3","m14 17 1.5 1.5L19 15"],
   "Locales":["M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z","M12 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"],
   "Reportes":["M4 20V10h4v10H4ZM10 20V4h4v16h-4ZM16 20V7h4v13h-4Z"],
@@ -1231,7 +1235,7 @@ export default function Home() {
 
         {active==="Panel general"&&isAdmin&&data&&<DashboardInsights locations={data.locations} apiFetch={apiFetch} setNotice={setNotice} onNavigate={section=>setActive(section)} />}
 
-        {!['Panel general','Calificación administrador','Constancias','Autorizaciones','Cumplimiento semanal'].includes(active)&&<section className="kpis">
+        {!['Panel general','Calificación administrador','Constancias','Autorizaciones','Cumplimiento semanal','Rentabilidad ciudades','Gestión de clientes'].includes(active)&&<section className="kpis">
           <article><span>Supervisores activos</span><strong>{data?.supervisors.filter(s=>s.active===1).length ?? people.length}</strong><small className="ok">● Nómina disponible</small></article>
           <article><span>Horas planificadas</span><strong>{displayHours(people.reduce((n,p) => n + hoursFor(p),0))} h</strong><small>Calculadas según cada rango</small></article>
           <article><span>Cobertura semanal</span><strong>96%</strong><div className="progress"><i /></div></article>
@@ -1298,6 +1302,8 @@ export default function Home() {
         {active === "Constancias" && data && <Constancias locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
         {active === "Autorizaciones" && data && <Authorizations locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
         {active === "Cumplimiento semanal" && data && <WeeklyCompliance locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
+        {active === "Rentabilidad ciudades" && isAdmin && data && <RegionalProfitability locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
+        {active === "Gestión de clientes" && data && <RegionalClients locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
 
         {active === "Reportes" && <section className="management-card">
           <div className="management-head"><div><h2>Asignación automática de compra</h2><p>Genera la asignación automática de compra en Excel con ID, mes, día, horas y día libre.</p></div><button className="primary" onClick={downloadShopperReport}>⇩ Descargar asignación</button></div>
