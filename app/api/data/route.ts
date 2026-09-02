@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+export const dynamic="force-dynamic";
+export const revalidate=0;
+
 function client(request:NextRequest) {
   const token=request.headers.get("x-supabase-token")||"";
   return createClient(
@@ -77,7 +80,7 @@ export async function GET(request:NextRequest) {
     supervisors:(supervisors||[]).map((x:any)=>({...x,location_name:x.locations?.name||"",city:x.locations?.city||"",active:x.active?1:0})),
     assignments:(assignments||[]).map((x:any)=>({...x,role_name:x.roles?.name||"",color:tone(x.roles?.color||"",x.roles?.name||""),hours:workedHours(x.start_time,x.end_time,x.roles?.counts_hours!==false)})),
     currentUser:{email:profile.email,name:profile.full_name||profile.email,role:profile.app_role,locationId:profile.location_id,locationIds}
-  });
+  },{headers:{"Cache-Control":"private, no-store, max-age=0"}});
 }
 
 export async function POST(request:NextRequest) {
