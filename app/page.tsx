@@ -198,6 +198,7 @@ export default function Home() {
   const [fillDrag,setFillDrag]=useState<FillDrag|null>(null);
   const fillDragRef=useRef<FillDrag|null>(null);
   const shopperLoadRequestRef=useRef(0);
+  const dataLoadRequestRef=useRef(0);
   const shopperMutationVersionRef=useRef(0);
   const shopperMutationBusyRef=useRef(false);
   const [,setShopperMutationBusy]=useState(false);
@@ -221,7 +222,7 @@ export default function Home() {
     const {data:{session}} = await supabase.auth.getSession();
     const headers = new Headers(init.headers);
     if (session?.access_token) headers.set("x-supabase-token",session.access_token);
-    return fetch(path,{...init,headers});
+    return fetch(path,{...init,headers,cache:init.cache??"no-store"});
   }
 
   async function signOutSafely(){
@@ -233,8 +234,9 @@ export default function Home() {
   }
 
   async function loadData() {
+    const requestId=++dataLoadRequestRef.current;
     try {
-      const response = await apiFetch("/api/data");
+      const response = await apiFetch(`/api/data?refresh=${Date.now()}`);
       if (!response.ok) {
         if (response.status === 401) { setAccessState("signin"); return; }
         if (response.status === 403) { setAccessState("denied"); return; }
@@ -243,6 +245,7 @@ export default function Home() {
         return;
       }
       const payload = await response.json() as DataSet;
+      if(requestId!==dataLoadRequestRef.current)return;
       setData(payload);
       setAccessState("authorized");
       try{window.localStorage.setItem(dataCacheKey(payload.currentUser.email),JSON.stringify(payload));}catch{}
@@ -311,6 +314,19 @@ export default function Home() {
   useEffect(() => {
     if (active === "Accesos" && data?.currentUser.role === "admin") void loadAccessUsers();
   },[active,data?.currentUser.role]);
+  useEffect(()=>{
+    if(accessState!=="authorized"||active!=="Horarios")return;
+    const refresh=()=>{if(document.visibilityState==="visible")void loadData();};
+    refresh();
+    window.addEventListener("focus",refresh);
+    document.addEventListener("visibilitychange",refresh);
+    const timer=window.setInterval(refresh,30000);
+    return ()=>{
+      window.clearInterval(timer);
+      window.removeEventListener("focus",refresh);
+      document.removeEventListener("visibilitychange",refresh);
+    };
+  },[accessState,active,weekStart]);
   useEffect(()=>{
     if(active==="Reportes"){
       setReportType("shopper");
