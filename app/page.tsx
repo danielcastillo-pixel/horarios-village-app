@@ -336,8 +336,21 @@ export default function Home() {
   useEffect(()=>{
     if(!data||accessState!=="authorized")return;
     if(active==="Shoppers"&&shopperView==="directory")void loadShopperDirectory();
-    else if(active==="Panel general"||active==="Shoppers"||active==="Reportes")void loadShoppers();
+    else if(active==="Panel general"||active==="Reportes")void loadShoppers();
   },[active,shopperCategory,reportType,shopperView,data,accessState]);
+  useEffect(()=>{
+    if(!data||accessState!=="authorized"||active!=="Shoppers"||shopperView!=="schedule")return;
+    const refresh=()=>{if(document.visibilityState==="visible")void loadShoppers();};
+    refresh();
+    window.addEventListener("focus",refresh);
+    document.addEventListener("visibilitychange",refresh);
+    const timer=window.setInterval(refresh,30000);
+    return ()=>{
+      window.clearInterval(timer);
+      window.removeEventListener("focus",refresh);
+      document.removeEventListener("visibilitychange",refresh);
+    };
+  },[accessState,active,shopperView,shopperCategory,weekStart,location,data?.currentUser.email]);
   useEffect(() => {
     if (!data) return;
     const weekFirst=dateKeys[0],weekLast=dateKeys[6];
@@ -807,7 +820,8 @@ export default function Home() {
     const requestId=++shopperLoadRequestRef.current;
     const mutationVersion=shopperMutationVersionRef.current;
     const categories:("purchase"|"delivery")[]=active==="Panel general"?["purchase","delivery"]:[shopperCategory];
-    const responses=await Promise.all(categories.map(category=>apiFetch(`/api/shoppers?category=${category}`)));
+    const refresh=Date.now();
+    const responses=await Promise.all(categories.map(category=>apiFetch(`/api/shoppers?category=${category}&refresh=${refresh}`)));
     const failed=responses.find(response=>!response.ok);
     if(failed){const p=await failed.json().catch(()=>({error:"No disponible"}));if(requestId===shopperLoadRequestRef.current&&mutationVersion===shopperMutationVersionRef.current)setNotice(`Error: ${p.error}`);return;}
     const payloads=await Promise.all(responses.map(response=>response.json() as Promise<{staff:ShopperRow[];turns:ShopperTurnRow[];shiftTypes:ShopperShiftType[]}>));
