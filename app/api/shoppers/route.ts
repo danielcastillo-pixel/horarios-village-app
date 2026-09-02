@@ -35,6 +35,24 @@ function invalidDate(value:unknown){
   const parsed=new Date(`${date}T12:00:00`);
   return Number.isNaN(parsed.getTime())||parsed.toISOString().slice(0,10)!==date;
 }
+async function loadTurns(db:ReturnType<typeof client>,start:string,end:string,staffIds:number[]){
+  if(!staffIds.length)return {data:[] as any[],error:null};
+  const rows:any[]=[];
+  const pageSize=1000;
+  for(let from=0;;from+=pageSize){
+    let query:any=db.from("shopper_turns").select("*")
+      .gte("work_date",start).lte("work_date",end)
+      .order("id",{ascending:true}).range(from,from+pageSize-1);
+    if(staffIds.length<=200)query=query.in("staff_id",staffIds);
+    const {data,error}=await query;
+    if(error)return {data:rows,error};
+    const page=(data||[]) as any[];
+    rows.push(...page);
+    if(page.length<pageSize)break;
+  }
+  const allowed=new Set(staffIds);
+  return {data:rows.filter(row=>allowed.has(Number(row.staff_id))),error:null};
+}
 export async function GET(request:NextRequest){
   const auth=await authenticate(request);if(!auth)return NextResponse.json({error:"Sesión no válida"},{status:401});
   const db=auth.db,category=request.nextUrl.searchParams.get("category")==="delivery"?"delivery":"purchase";
@@ -43,13 +61,20 @@ export async function GET(request:NextRequest){
     if(error)return NextResponse.json({error:databaseError(error,"No se pudo cargar el repositorio de shoppers")},{status:400});
     return NextResponse.json({staff:(data||[]).map((x:any)=>({...x,location_name:x.locations?.name||"",active:x.active?1:0}))},{headers:{"Cache-Control":"private, no-store, max-age=0"}});
   }
-  const [{data:staff,error},{data:turns,error:te},{data:shiftTypes}]=await Promise.all([
-    db.from("shopper_staff").select("*,locations(name)").eq("category",category).eq("active",true).order("name"),
-    db.from("shopper_turns").select("*").gte("work_date",SCHEDULE_MIN_DATE).lte("work_date",SCHEDULE_MAX_DATE),
+  const startParam=request.nextUrl.searchParams.get("start"),endParam=request.nextUrl.searchParams.get("end");
+  if((startParam&&invalidDate(startParam))||(endParam&&invalidDate(endParam))||(startParam&&endParam&&startParam>endParam))return NextResponse.json({error:"El rango del horario no es válido"},{status:400});
+  const start=startParam||SCHEDULE_MIN_DATE,end=endParam||SCHEDULE_MAX_DATE;
+  const locationId=Number(request.nextUrl.searchParams.get("locationId"));
+  let staffQuery:any=db.from("shopper_staff").select("*,locations(name)").eq("category",category).eq("active",true).order("name");
+  if(Number.isInteger(locationId)&&locationId>0)staffQuery=staffQuery.eq("location_id",locationId);
+  const {data:staff,error}=await staffQuery;
+  if(error)return NextResponse.json({error:databaseError(error,"No se pudo cargar el personal de shoppers")},{status:400});
+  const staffIds=(staff||[]).map((x:any)=>Number(x.id));
+  const [{data:turns,error:te},{data:shiftTypes}]=await Promise.all([
+    loadTurns(db,start,end,staffIds),
     db.from("shopper_shift_types").select("*").or(`category.eq.${category},category.eq.both`).order("code")
   ]);
-  if(error||te)return NextResponse.json({error:databaseError(error||te,"No se pudo cargar el horario de shoppers")},{status:400});
-  const ids=new Set((staff||[]).map((x:any)=>x.id));
+  if(te)return NextResponse.json({error:databaseError(te,"No se pudo cargar el horario de shoppers")},{status:400});
   const defaults=[
     {id:-1,code:"A",label:"Apertura",start_time:"06:00",end_time:"14:00",category:"both",counts_opening:true,counts_closing:false,is_free:false,location_id:null,created_by:null,is_general:true,active:true},
     {id:-3,code:"B",label:"Intermedio",start_time:"10:00",end_time:"18:00",category:"both",counts_opening:false,counts_closing:false,is_free:false,location_id:null,created_by:null,is_general:true,active:true},
@@ -59,7 +84,7 @@ export async function GET(request:NextRequest){
   ];
   return NextResponse.json({
     staff:(staff||[]).map((x:any)=>({...x,location_name:x.locations?.name||"",active:x.active?1:0})),
-    turns:(turns||[]).filter((x:any)=>ids.has(x.staff_id)),
+    turns:turns||[],
     shiftTypes:shiftTypes?.length?shiftTypes:defaults
   },{headers:{"Cache-Control":"private, no-store, max-age=0"}});
 }
