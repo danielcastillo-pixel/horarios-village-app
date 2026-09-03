@@ -66,6 +66,11 @@ function validatedRows(value:unknown){
   return [...rows.values()];
 }
 
+export async function GET(){
+  const configured=Boolean(await openAiApiKey());
+  return NextResponse.json({configured,version:"ai-secret-check-2"},{status:configured?200:503,headers:{"Cache-Control":"no-store, max-age=0"}});
+}
+
 export async function POST(request:NextRequest){
   const auth=await authenticateAdmin(request);if(auth.error)return auth.error;
   if(Number(request.headers.get("content-length")||0)>MAX_IMAGE_BYTES+1024*1024)return NextResponse.json({error:"La captura puede pesar máximo 8 MB."},{status:413});
