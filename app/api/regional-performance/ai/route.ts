@@ -43,6 +43,25 @@ function outputText(payload:any){
   return "";
 }
 
+function openAiError(payload:any,status:number){
+  const code=clean(payload?.error?.code,100),type=clean(payload?.error?.type,100);
+  if(status===429){
+    if(["credit_balance_exhausted","insufficient_quota","billing_hard_limit_reached"].includes(code)||type==="insufficient_quota"){
+      return {error:"La cuenta de OpenAI API no tiene saldo disponible. Agrega créditos en la facturación de OpenAI Platform para usar el asistente.",status:429};
+    }
+    if(["organization_spend_limit_exceeded","project_spend_limit_exceeded"].includes(code)){
+      return {error:"La cuenta de OpenAI API alcanzó su límite de gasto. Aumenta el límite en OpenAI Platform para usar el asistente.",status:429};
+    }
+    if(code==="organization_usage_limit_exceeded"){
+      return {error:"La cuenta de OpenAI API alcanzó su límite de uso. Revisa los límites de la organización en OpenAI Platform.",status:429};
+    }
+    return {error:"OpenAI recibió demasiadas solicitudes. Espera unos segundos e inténtalo nuevamente.",status:429};
+  }
+  if(status===401||status===403)return {error:"La clave privada del asistente necesita ser revisada.",status:503};
+  if(status===503)return {error:"OpenAI está temporalmente ocupado. Inténtalo nuevamente en un momento.",status:503};
+  return {error:"La captura no pudo ser analizada en este momento.",status:502};
+}
+
 function validatedRows(value:unknown){
   const source=Array.isArray(value)?value:[],rows=new Map<string,AiRow>();
   for(const item of source){
@@ -121,9 +140,8 @@ export async function POST(request:NextRequest){
     });
     const payload=await response.json().catch(()=>null) as any;
     if(!response.ok){
-      if(response.status===429)return NextResponse.json({error:"El asistente está ocupado o alcanzó su límite. Intenta nuevamente en un momento."},{status:429});
-      if(response.status===401||response.status===403)return NextResponse.json({error:"La clave privada del asistente necesita ser revisada."},{status:503});
-      return NextResponse.json({error:"La captura no pudo ser analizada en este momento."},{status:502});
+      const friendly=openAiError(payload,response.status);
+      return NextResponse.json({error:friendly.error},{status:friendly.status});
     }
     if(payload?.status==="incomplete")return NextResponse.json({error:"La captura es demasiado extensa o poco legible. Recórtala para que se vea únicamente la tabla."},{status:422});
     const text=outputText(payload);if(!text)return NextResponse.json({error:"La IA no devolvió información legible."},{status:422});
