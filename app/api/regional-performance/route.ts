@@ -12,9 +12,11 @@ function dbFor(request:NextRequest){return createClient(process.env.NEXT_PUBLIC_
 function isDate(value:unknown){const date=String(value||"");if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return false;const parsed=new Date(`${date}T12:00:00Z`);return !Number.isNaN(parsed.getTime())&&parsed.toISOString().slice(0,10)===date;}
 function isMonday(value:string){return isDate(value)&&new Date(`${value}T12:00:00Z`).getUTCDay()===1;}
 function clean(value:unknown,max:number){return String(value??"").trim().slice(0,max);}
+function normalizeCity(value:unknown){return clean(value,120).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();}
 function numberValue(value:unknown,min:number,max:number){const parsed=Number(value);return Number.isFinite(parsed)&&parsed>=min&&parsed<=max?parsed:null;}
 function integerValue(value:unknown,min:number,max:number){const parsed=numberValue(value,min,max);return parsed===null?null:Math.round(parsed);}
 function uniquePaths(value:unknown){return [...new Set((Array.isArray(value)?value:[]).map(path=>clean(path,500)).filter(Boolean))];}
+function supplied(source:Record<string,unknown>,key:string){return Object.prototype.hasOwnProperty.call(source,key)&&source[key]!==null&&source[key]!==undefined&&source[key]!=="";}
 
 async function authenticateAdmin(request:NextRequest){
   const token=tokenFrom(request);if(!token)return {error:NextResponse.json({error:"Sesión no válida."},{status:401})};
@@ -74,7 +76,36 @@ export async function POST(request:NextRequest){
     if(action==="importKpis"){
       const rows=Array.isArray(body.rows)?body.rows as Record<string,unknown>[]:[];
       if(!rows.length||rows.length>200)return NextResponse.json({error:"El archivo debe contener entre 1 y 200 ciudades."},{status:400});
-      const values=rows.map(row=>kpiValues({...row,weekStart:body.weekStart},auth.profile.id));
+      const weekStart=clean(body.weekStart,10);
+      if(!isMonday(weekStart))return NextResponse.json({error:"Selecciona una semana válida."},{status:400});
+      const uniqueRows=new Map<string,Record<string,unknown>>();
+      for(const row of rows){const key=normalizeCity(row.city);if(key)uniqueRows.set(key,row);}
+      if(!uniqueRows.size)return NextResponse.json({error:"No se encontraron ciudades válidas."},{status:400});
+      const {data:existing,error:existingError}=await auth.db.from("regional_weekly_kpis").select("*").eq("week_start",weekStart);
+      if(existingError)throw existingError;
+      const existingByCity=new Map((existing||[]).map(row=>[normalizeCity(row.city),row]));
+      const values=[...uniqueRows.entries()].map(([key,row])=>{
+        const current=existingByCity.get(key) as Record<string,unknown>|undefined;
+        const pick=(inputKey:string,databaseKey:string,fallback:unknown)=>supplied(row,inputKey)?row[inputKey]:current?.[databaseKey]??fallback;
+        return kpiValues({
+          weekStart,
+          city:current?.city??row.city,
+          sales:pick("sales","sales",0),
+          orders:pick("orders","orders",0),
+          activeClients:pick("activeClients","active_clients",0),
+          averageTicket:pick("averageTicket","average_ticket",0),
+          marginPercent:pick("marginPercent","margin_percent",0),
+          latePercent:pick("latePercent","late_percent",0),
+          reschedulingPercent:pick("reschedulingPercent","rescheduling_percent",0),
+          oosPercent:pick("oosPercent","oos_percent",0),
+          incidents:pick("incidents","incidents",0),
+          analysis:pick("analysis","analysis",""),
+          affectedClients:pick("affectedClients","affected_clients",""),
+          affectedSectors:pick("affectedSectors","affected_sectors",""),
+          actionPlan:pick("actionPlan","action_plan",""),
+          meetingSummary:pick("meetingSummary","meeting_summary","")
+        },auth.profile.id);
+      });
       const {error}=await auth.db.from("regional_weekly_kpis").upsert(values,{onConflict:"week_start,city"});
       if(error)throw error;
       return NextResponse.json({ok:true,imported:values.length});
