@@ -1,5 +1,6 @@
 import {NextRequest,NextResponse} from "next/server";
 import {createClient} from "@supabase/supabase-js";
+import {getCloudflareContext} from "@opennextjs/cloudflare";
 
 export const dynamic="force-dynamic";
 export const revalidate=0;
@@ -15,6 +16,15 @@ function dbFor(request:NextRequest){return createClient(process.env.NEXT_PUBLIC_
 function clean(value:unknown,max:number){return String(value??"").trim().slice(0,max);}
 function normalizeCity(value:unknown){return clean(value,120).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();}
 function finiteOrNull(value:unknown,min:number,max:number,integer=false){if(value===null||value===undefined||value==="")return null;const parsed=Number(value);if(!Number.isFinite(parsed)||parsed<min||parsed>max)return null;return integer?Math.round(parsed):Math.round(parsed*100)/100;}
+
+async function openAiApiKey(){
+  const processValue=process.env.OPENAI_API_KEY?.trim();if(processValue)return processValue;
+  try{
+    const context=await getCloudflareContext({async:true});
+    const binding=(context.env as Record<string,unknown>).OPENAI_API_KEY;
+    return typeof binding==="string"?binding.trim():"";
+  }catch{return "";}
+}
 
 async function authenticateAdmin(request:NextRequest){
   const token=tokenFrom(request);if(!token)return {error:NextResponse.json({error:"Sesión no válida."},{status:401})};
@@ -59,7 +69,7 @@ function validatedRows(value:unknown){
 export async function POST(request:NextRequest){
   const auth=await authenticateAdmin(request);if(auth.error)return auth.error;
   if(Number(request.headers.get("content-length")||0)>MAX_IMAGE_BYTES+1024*1024)return NextResponse.json({error:"La captura puede pesar máximo 8 MB."},{status:413});
-  const apiKey=process.env.OPENAI_API_KEY?.trim();
+  const apiKey=await openAiApiKey();
   if(!apiKey)return NextResponse.json({error:"El asistente de IA todavía no tiene configurada su clave privada."},{status:503});
   try{
     const form=await request.formData(),image=form.get("image");
