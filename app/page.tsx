@@ -743,12 +743,15 @@ export default function Home() {
     }
   }
 
-  async function downloadPurchaseScheduleExcel() {
+  async function downloadShopperScheduleExcel() {
+    const selectedCategory=shopperCategory;
+    const reportName=selectedCategory==="purchase"?"COMPRA":"ENTREGA";
+    const staffLabel=selectedCategory==="purchase"?"asesor":"repartidor";
     const selectedLocations=location==="Todos los locales"
-      ? [...new Set(shopperStaff.filter(person=>person.category==="purchase").map(person=>person.location_name))].sort((a,b)=>a.localeCompare(b,"es"))
+      ? [...new Set(shopperStaff.filter(person=>person.category===selectedCategory).map(person=>person.location_name))].sort((a,b)=>a.localeCompare(b,"es"))
       : [location];
-    const populatedLocations=selectedLocations.filter(local=>shopperStaff.some(person=>person.category==="purchase"&&person.location_name===local));
-    if(!populatedLocations.length){setNotice("No existen asesores de compra para generar el horario de esta semana");return;}
+    const populatedLocations=selectedLocations.filter(local=>shopperStaff.some(person=>person.category===selectedCategory&&person.location_name===local));
+    if(!populatedLocations.length){setNotice(`No existen ${selectedCategory==="purchase"?"asesores de compra":"repartidores"} para generar el horario de esta semana`);return;}
 
     const workbook=XLSX.utils.book_new();
     const usedSheetNames=new Set<string>();
@@ -762,27 +765,27 @@ export default function Home() {
     };
 
     populatedLocations.forEach(local=>{
-      const staff=shopperStaff.filter(person=>person.category==="purchase"&&person.location_name===local).sort((a,b)=>a.name.localeCompare(b.name,"es"));
+      const staff=shopperStaff.filter(person=>person.category===selectedCategory&&person.location_name===local).sort((a,b)=>a.name.localeCompare(b.name,"es"));
       const openingTimes=[...new Set(staff.flatMap(person=>dateKeys.map((_,day)=>typeFor(person,day)).filter(type=>type&&!type.is_free&&type.start_time).map(type=>type!.start_time!.slice(0,5))))].sort();
       const closingTimes=[...new Set(staff.flatMap(person=>dateKeys.map((_,day)=>typeFor(person,day)).filter(type=>type&&!type.is_free&&type.end_time).map(type=>type!.end_time!.slice(0,5))))].sort();
       const rows:(string|number)[][]=[];
-      rows.push(["HORARIO COMPRA","","","","","","","","",""]);
+      rows.push([`HORARIO ${reportName}`,"","","","","","","","",""]);
       rows.push(["","","","","","","","","",""]);
-      rows.push([`${local} · ${weekLabel} · ${staff.length} asesor${staff.length===1?"":"es"} de compra`,"","","","","","","","",""]);
+      rows.push([`${local} · ${weekLabel} · ${staff.length} ${staffLabel}${staff.length===1?"":"es"}${selectedCategory==="purchase"?" de compra":""}`,"","","","","","","","",""]);
       rows.push(["","","","","","","","","",""]);
       const openingHeader=rows.length;
-      rows.push(["TOTAL APERTURA COMPRA","","",...days]);
+      rows.push([`TOTAL APERTURA ${reportName}`,"","",...days]);
       openingTimes.forEach(time=>rows.push([`INGRESO ${time}`,"","",...dateKeys.map((_,day)=>staff.filter(person=>{const type=typeFor(person,day);return Boolean(type&&!type.is_free&&type.start_time?.slice(0,5)===time);}).length)]));
       if(!openingTimes.length)rows.push(["SIN APERTURAS REGISTRADAS","","",...dateKeys.map(()=>0)]);
       rows.push(["","","","","","","","","",""]);
       const mainHeader=rows.length;
-      rows.push(["N.º","NOMBRE","ID SHOPPER",...days]);
+      rows.push(["N.º","NOMBRE",selectedCategory==="purchase"?"ID SHOPPER":"ID REPARTIDOR",...days]);
       const firstStaffRow=rows.length;
       staff.forEach((person,index)=>rows.push([index+1,person.name,person.shopper_external_id??"—",...dateKeys.map((_,day)=>turnFor(person,day)?.turn_code??"—")]));
       const lastStaffRow=rows.length-1;
       rows.push(["","","","","","","","","",""]);
       const closingHeader=rows.length;
-      rows.push(["TOTAL CIERRE COMPRA","","",...days]);
+      rows.push([`TOTAL CIERRE ${reportName}`,"","",...days]);
       closingTimes.forEach(time=>rows.push([`CIERRE ${time}`,"","",...dateKeys.map((_,day)=>staff.filter(person=>{const type=typeFor(person,day);return Boolean(type&&!type.is_free&&type.end_time?.slice(0,5)===time);}).length)]));
       if(!closingTimes.length)rows.push(["SIN CIERRES REGISTRADOS","","",...dateKeys.map(()=>0)]);
       rows.push(["","","","","","","","","",""]);
@@ -868,8 +871,8 @@ export default function Home() {
     const scope=location==="Todos los locales"?"Region_Sur":location.replace(/[^a-z0-9]+/gi,"_");
     try{
       setNotice("Generando Excel profesional del horario...");
-      await downloadWorkbookXlsx(workbook,`Horario_Compra_${scope}_${weekStart}.xlsx`);
-      setNotice(`✓ Horario profesional de compra generado (${populatedLocations.length} ${populatedLocations.length===1?"local":"locales"})`);
+      await downloadWorkbookXlsx(workbook,`Horario_${selectedCategory==="purchase"?"Compra":"Entrega"}_${scope}_${weekStart}.xlsx`);
+      setNotice(`✓ Horario profesional de ${selectedCategory==="purchase"?"compra":"repartidores"} generado (${populatedLocations.length} ${populatedLocations.length===1?"local":"locales"})`);
     }catch(error){
       if(error instanceof DOMException&&error.name==="AbortError")setNotice("Se canceló la descarga del Excel");
       else setNotice("Error: no se pudo generar el Excel del horario");
@@ -1417,7 +1420,7 @@ export default function Home() {
         {active==="Shoppers"&&<section className="schedule-card shopper-schedule" ref={shopperScheduleRef}>
           <div className="shopper-view-tabs"><button className={shopperView==="schedule"?"active":""} onClick={()=>setShopperView("schedule")}><i>▦</i><span><strong>Horarios</strong><small>Programación semanal</small></span></button><button className={shopperView==="directory"?"active":""} onClick={()=>setShopperView("directory")}><i>⌕</i><span><strong>Repositorio de shoppers</strong><small>Buscar IDs y cambiar locales</small></span></button></div>
           {shopperView==="schedule"?<>
-          <div className="schedule-title"><div><h2>Horario de shoppers</h2><p>Programación por turnos del personal de tus locales asignados.</p><span className="fill-help"><i /> Arrastra el cuadro naranja hacia arriba, abajo, izquierda o derecha para copiar.</span></div><div className="schedule-actions shopper-actions"><button className="schedule-action-button publish-action" onClick={()=>void publishWeeklyActivity(shopperCategory==="purchase"?"shopper_purchase":"shopper_delivery")}>✓ Publicar {shopperCategory==="purchase"?"compra":"entrega"}</button><button className="schedule-action-button" onClick={()=>setAddShopper(true)}>＋ Agregar shopper</button><button className="schedule-action-button" onClick={()=>setAddShopperShift(true)}>＋ Crear turno</button><button className="schedule-action-button" onClick={()=>void copyShopperWeek()}>▣ Copiar semana</button>{shopperCategory==="purchase"&&<button className="schedule-action-button" onClick={()=>void downloadPurchaseScheduleExcel()}>⇩ Descargar Excel</button>}<button className="schedule-action-button image-action" onClick={()=>setShopperImageChoice(true)}>▧ Descargar imagen</button></div></div>
+          <div className="schedule-title"><div><h2>Horario de shoppers</h2><p>Programación por turnos del personal de tus locales asignados.</p><span className="fill-help"><i /> Arrastra el cuadro naranja hacia arriba, abajo, izquierda o derecha para copiar.</span></div><div className="schedule-actions shopper-actions"><button className="schedule-action-button publish-action" onClick={()=>void publishWeeklyActivity(shopperCategory==="purchase"?"shopper_purchase":"shopper_delivery")}>✓ Publicar {shopperCategory==="purchase"?"compra":"entrega"}</button><button className="schedule-action-button" onClick={()=>setAddShopper(true)}>＋ Agregar shopper</button><button className="schedule-action-button" onClick={()=>setAddShopperShift(true)}>＋ Crear turno</button><button className="schedule-action-button" onClick={()=>void copyShopperWeek()}>▣ Copiar semana</button><button className="schedule-action-button" onClick={()=>void downloadShopperScheduleExcel()}>⇩ Descargar Excel</button><button className="schedule-action-button image-action" onClick={()=>setShopperImageChoice(true)}>▧ Descargar imagen</button></div></div>
           <div className="shopper-submenu"><button className={shopperCategory==="purchase"?"active":""} onClick={()=>setShopperCategory("purchase")}>Asesores de compra</button><button className={shopperCategory==="delivery"?"active":""} onClick={()=>setShopperCategory("delivery")}>Repartidores</button></div>
           <div className="toolbar"><div className="week"><button onClick={()=>changeWeek(-1)}>‹</button><strong>{weekLabel}</strong><button onClick={()=>changeWeek(1)}>›</button></div><select value={location} onChange={e=>setLocation(e.target.value)}>{isAdmin&&<option>Todos los locales</option>}{data?.locations.map(l=><option key={l.id}>{l.name}</option>)}</select></div>
           {(()=>{
