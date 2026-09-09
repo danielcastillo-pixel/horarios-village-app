@@ -743,57 +743,54 @@ export default function Home() {
     }
   }
 
-  async function downloadSupervisorScheduleExcel() {
+  async function downloadPurchaseScheduleExcel() {
     const selectedLocations=location==="Todos los locales"
-      ? [...new Set(people.map(person=>person.location))].sort((a,b)=>a.localeCompare(b,"es"))
+      ? [...new Set(shopperStaff.filter(person=>person.category==="purchase").map(person=>person.location_name))].sort((a,b)=>a.localeCompare(b,"es"))
       : [location];
-    const populatedLocations=selectedLocations.filter(local=>people.some(person=>person.location===local));
-    if(!populatedLocations.length){setNotice("No existen supervisores para generar el horario de esta semana");return;}
+    const populatedLocations=selectedLocations.filter(local=>shopperStaff.some(person=>person.category==="purchase"&&person.location_name===local));
+    if(!populatedLocations.length){setNotice("No existen asesores de compra para generar el horario de esta semana");return;}
 
     const workbook=XLSX.utils.book_new();
     const usedSheetNames=new Set<string>();
     const border={style:"thin",color:{rgb:"B7C3D0"}};
     const baseFont={name:"Arial",sz:10,color:{rgb:"1F2937"}};
-    const fills:Record<string,string>={blue:"BDD7EE",green:"C6E0B4",orange:"F4B183",yellow:"FFE699",purple:"D9C2E9"};
-    const safeTime=(item:Shift|null,index:0|1)=>shiftTime(item,index,"");
-    const isFree=(item:Shift|null)=>!item||item.time==="LIBRE"||["Libre","Descanso","Vacaciones"].includes(item.role);
+    const turnColors:Record<string,string>={A:"C6E0B4",A1:"C6E0B4",A2:"C6E0B4",B:"9DC3E6",T:"F4B183",C:"FFD966",I:"E7E6E6",N:"D9EAD3",L:"FFFFFF",V:"D9D9D9"};
+    const turnFor=(staff:ShopperRow,day:number)=>shopperTurns.find(turn=>turn.staff_id===staff.id&&turn.work_date===dateKeys[day]);
+    const typeFor=(staff:ShopperRow,day:number)=>{
+      const turn=turnFor(staff,day);
+      return shopperShiftFor(turn?.turn_code??"",staff.location_id,turn?.shift_type_id);
+    };
 
     populatedLocations.forEach(local=>{
-      const staff=people.filter(person=>person.location===local).sort((a,b)=>a.name.localeCompare(b.name,"es"));
-      const openingTimes=[...new Set(staff.flatMap(person=>person.shifts.map(item=>isFree(item)?"":safeTime(item,0))).filter(Boolean))].sort();
-      const closingTimes=[...new Set(staff.flatMap(person=>person.shifts.map(item=>isFree(item)?"":safeTime(item,1))).filter(Boolean))].sort();
+      const staff=shopperStaff.filter(person=>person.category==="purchase"&&person.location_name===local).sort((a,b)=>a.name.localeCompare(b.name,"es"));
+      const openingTimes=[...new Set(staff.flatMap(person=>dateKeys.map((_,day)=>typeFor(person,day)).filter(type=>type&&!type.is_free&&type.start_time).map(type=>type!.start_time!.slice(0,5))))].sort();
+      const closingTimes=[...new Set(staff.flatMap(person=>dateKeys.map((_,day)=>typeFor(person,day)).filter(type=>type&&!type.is_free&&type.end_time).map(type=>type!.end_time!.slice(0,5))))].sort();
       const rows:(string|number)[][]=[];
-      rows.push(["HORARIO DE SUPERVISIÓN","","","","","","","","",""]);
+      rows.push(["HORARIO COMPRA","","","","","","","","",""]);
       rows.push(["","","","","","","","","",""]);
-      rows.push([`${local} · ${weekLabel} · ${staff.length} supervisor${staff.length===1?"":"es"}`,"","","","","","","","",""]);
+      rows.push([`${local} · ${weekLabel} · ${staff.length} asesor${staff.length===1?"":"es"} de compra`,"","","","","","","","",""]);
       rows.push(["","","","","","","","","",""]);
       const openingHeader=rows.length;
-      rows.push(["TOTAL APERTURA SUPERVISIÓN","","",...days]);
-      openingTimes.forEach(time=>rows.push([`INGRESO ${time}`,"","",...dateKeys.map((_,day)=>staff.filter(person=>safeTime(person.shifts[day],0)===time&&!isFree(person.shifts[day])).length)]));
+      rows.push(["TOTAL APERTURA COMPRA","","",...days]);
+      openingTimes.forEach(time=>rows.push([`INGRESO ${time}`,"","",...dateKeys.map((_,day)=>staff.filter(person=>{const type=typeFor(person,day);return Boolean(type&&!type.is_free&&type.start_time?.slice(0,5)===time);}).length)]));
       if(!openingTimes.length)rows.push(["SIN APERTURAS REGISTRADAS","","",...dateKeys.map(()=>0)]);
       rows.push(["","","","","","","","","",""]);
       const mainHeader=rows.length;
-      rows.push(["N.º","SUPERVISOR","LOCAL",...days]);
+      rows.push(["N.º","NOMBRE","ID SHOPPER",...days]);
       const firstStaffRow=rows.length;
-      staff.forEach((person,index)=>rows.push([index+1,person.name,person.location,...person.shifts.map(item=>item?.role??"—")]));
+      staff.forEach((person,index)=>rows.push([index+1,person.name,person.shopper_external_id??"—",...dateKeys.map((_,day)=>turnFor(person,day)?.turn_code??"—")]));
       const lastStaffRow=rows.length-1;
       rows.push(["","","","","","","","","",""]);
       const closingHeader=rows.length;
-      rows.push(["TOTAL CIERRE SUPERVISIÓN","","",...days]);
-      closingTimes.forEach(time=>rows.push([`CIERRE ${time}`,"","",...dateKeys.map((_,day)=>staff.filter(person=>safeTime(person.shifts[day],1)===time&&!isFree(person.shifts[day])).length)]));
+      rows.push(["TOTAL CIERRE COMPRA","","",...days]);
+      closingTimes.forEach(time=>rows.push([`CIERRE ${time}`,"","",...dateKeys.map((_,day)=>staff.filter(person=>{const type=typeFor(person,day);return Boolean(type&&!type.is_free&&type.end_time?.slice(0,5)===time);}).length)]));
       if(!closingTimes.length)rows.push(["SIN CIERRES REGISTRADOS","","",...dateKeys.map(()=>0)]);
       rows.push(["","","","","","","","","",""]);
       const legendHeader=rows.length;
-      rows.push(["ROL / TURNO","INGRESO","SALIDA","HORAS","","","","","",""]);
-      const legend=new Map<string,{role:string;start:string;end:string;hours:number}>();
-      staff.forEach(person=>person.shifts.forEach(item=>{
-        if(!item)return;
-        const start=isFree(item)?"—":safeTime(item,0);
-        const end=isFree(item)?"—":safeTime(item,1);
-        const key=`${item.role}|${start}|${end}`;
-        if(!legend.has(key))legend.set(key,{role:item.role,start,end,hours:shiftHours(item)});
-      }));
-      [...legend.values()].sort((a,b)=>a.start.localeCompare(b.start)||a.role.localeCompare(b.role,"es")).forEach(item=>rows.push([item.role,item.start,item.end,item.hours,"","","","","",""]));
+      rows.push(["TURNO","DESCRIPCIÓN","INGRESO","SALIDA","","","","","",""]);
+      const legend=new Map<number,ShopperShiftType>();
+      staff.forEach(person=>dateKeys.forEach((_,day)=>{const type=typeFor(person,day);if(type)legend.set(type.id,type);}));
+      [...legend.values()].sort((a,b)=>(a.start_time??"99:99").localeCompare(b.start_time??"99:99")||a.code.localeCompare(b.code)).forEach(type=>rows.push([type.code,type.label,type.is_free?"—":type.start_time?.slice(0,5)??"—",type.is_free?"—":type.end_time?.slice(0,5)??"—","","","","","",""]));
       rows.push([`Generado el ${new Date().toLocaleDateString("es-EC")} · TIPTI Operaciones Región Sur`,"","","","","","","","",""]);
 
       const sheet=XLSX.utils.aoa_to_sheet(rows);
@@ -801,10 +798,12 @@ export default function Home() {
         {s:{r:0,c:0},e:{r:1,c:9}},
         {s:{r:2,c:0},e:{r:2,c:9}},
         {s:{r:openingHeader,c:0},e:{r:openingHeader,c:2}},
+        ...Array.from({length:openingTimes.length||1},(_,offset)=>({s:{r:openingHeader+1+offset,c:0},e:{r:openingHeader+1+offset,c:2}})),
         {s:{r:closingHeader,c:0},e:{r:closingHeader,c:2}},
+        ...Array.from({length:closingTimes.length||1},(_,offset)=>({s:{r:closingHeader+1+offset,c:0},e:{r:closingHeader+1+offset,c:2}})),
         {s:{r:rows.length-1,c:0},e:{r:rows.length-1,c:9}}
       ];
-      sheet["!cols"]=[{wch:7},{wch:32},{wch:27},...days.map(()=>({wch:14}))];
+      sheet["!cols"]=[{wch:8},{wch:38},{wch:16},...days.map(()=>({wch:12}))];
       sheet["!rows"]=rows.map((_,index)=>({hpt:index<=1?25:index===2?22:index===mainHeader?25:index>=firstStaffRow&&index<=lastStaffRow?28:21}));
       sheet["!autofilter"]={ref:XLSX.utils.encode_range({r:mainHeader,c:0},{r:lastStaffRow,c:9})};
       Object.assign(sheet,{
@@ -846,14 +845,15 @@ export default function Home() {
         for(let col=0;col<10;col++){
           const cell=sheet[XLSX.utils.encode_cell({r:row,c:col})];
           if(!cell)continue;
-          const shiftItem=col>=3?person.shifts[col-3]:null;
-          const fill=shiftItem?(fills[shiftItem.tone]??"E5E7EB"):(col<3?(index%2?"F7F9FC":"FFFFFF"):"F2F4F7");
-          cell.s={fill:{fgColor:{rgb:fill}},font:{...baseFont,bold:col===1||col>=3},alignment:{horizontal:col===1||col===2?"left":"center",vertical:"center",wrapText:true},border:{top:border,bottom:border,left:border,right:border}};
+          const code=col>=3?turnFor(person,col-3)?.turn_code??"": "";
+          const type=col>=3?typeFor(person,col-3):undefined;
+          const fill=col>=3?(type?.is_free?(code.toUpperCase()==="V"?"D9D9D9":"FFFFFF"):type?.counts_opening&&type?.counts_closing?"F4B183":type?.counts_opening?"C6E0B4":type?.counts_closing?"F4B183":turnColors[code.toUpperCase()]??(code?"EDE9FE":"F2F4F7")):(index%2?"F7F9FC":"FFFFFF");
+          cell.s={fill:{fgColor:{rgb:fill}},font:{...baseFont,bold:col===1||col>=3},alignment:{horizontal:col===1?"left":"center",vertical:"center",wrapText:true},border:{top:border,bottom:border,left:border,right:border}};
         }
       });
       for(let row=legendHeader+1;row<rows.length-1;row++)for(let col=0;col<4;col++){
         const cell=sheet[XLSX.utils.encode_cell({r:row,c:col})];
-        if(cell)cell.s={fill:{fgColor:{rgb:row%2?"F7F9FC":"FFFFFF"}},font:{...baseFont,bold:col===0},alignment:{horizontal:col===0?"left":"center",vertical:"center"},border:{top:border,bottom:border,left:border,right:border},numFmt:col===3?'0.00 "h"':undefined};
+        if(cell)cell.s={fill:{fgColor:{rgb:row%2?"F7F9FC":"FFFFFF"}},font:{...baseFont,bold:col===0},alignment:{horizontal:col===1?"left":"center",vertical:"center",wrapText:true},border:{top:border,bottom:border,left:border,right:border}};
       }
       const footer=sheet[XLSX.utils.encode_cell({r:rows.length-1,c:0})];
       if(footer)footer.s={font:{name:"Arial",sz:9,italic:true,color:{rgb:"667085"}},alignment:{horizontal:"right",vertical:"center"}};
@@ -868,8 +868,8 @@ export default function Home() {
     const scope=location==="Todos los locales"?"Region_Sur":location.replace(/[^a-z0-9]+/gi,"_");
     try{
       setNotice("Generando Excel profesional del horario...");
-      await downloadWorkbookXlsx(workbook,`Horario_Supervision_${scope}_${weekStart}.xlsx`);
-      setNotice(`✓ Excel profesional generado (${populatedLocations.length} ${populatedLocations.length===1?"local":"locales"})`);
+      await downloadWorkbookXlsx(workbook,`Horario_Compra_${scope}_${weekStart}.xlsx`);
+      setNotice(`✓ Horario profesional de compra generado (${populatedLocations.length} ${populatedLocations.length===1?"local":"locales"})`);
     }catch(error){
       if(error instanceof DOMException&&error.name==="AbortError")setNotice("Se canceló la descarga del Excel");
       else setNotice("Error: no se pudo generar el Excel del horario");
@@ -1398,7 +1398,7 @@ export default function Home() {
         </section>}
 
         {active === "Horarios" && <section className="schedule-card" ref={scheduleRef}>
-          <div className="schedule-title"><div><h2>Horario semanal</h2><p>Puedes editar nombres, quitar filas y modificar los turnos de tus locales asignados. Las semanas anteriores conservan su historial.</p><span className="fill-help"><i /> Arrastra el cuadro naranja hacia arriba, abajo, izquierda o derecha para copiar.</span></div><div className="schedule-actions"><button className="schedule-action-button publish-action" onClick={()=>void publishWeeklyActivity("supervisor_schedule")}>✓ Publicar semana</button><button className="schedule-action-button" onClick={() => setCreate("supervisor")}>＋ Agregar supervisor</button><button className="schedule-action-button" onClick={()=>void copyWeek()}>▣ Copiar semana</button><button className="schedule-action-button" onClick={()=>void downloadSupervisorScheduleExcel()}>⇩ Descargar Excel</button><button className="schedule-action-button image-action" onClick={()=>void downloadScheduleImage()}>▧ Descargar imagen</button></div></div>
+          <div className="schedule-title"><div><h2>Horario semanal</h2><p>Puedes editar nombres, quitar filas y modificar los turnos de tus locales asignados. Las semanas anteriores conservan su historial.</p><span className="fill-help"><i /> Arrastra el cuadro naranja hacia arriba, abajo, izquierda o derecha para copiar.</span></div><div className="schedule-actions"><button className="schedule-action-button publish-action" onClick={()=>void publishWeeklyActivity("supervisor_schedule")}>✓ Publicar semana</button><button className="schedule-action-button" onClick={() => setCreate("supervisor")}>＋ Agregar supervisor</button><button className="schedule-action-button" onClick={()=>void copyWeek()}>▣ Copiar semana</button><button className="schedule-action-button image-action" onClick={()=>void downloadScheduleImage()}>▧ Descargar imagen</button></div></div>
           <div className="toolbar">
             <div className="week"><button aria-label="Semana anterior" onClick={() => changeWeek(-1)}>‹</button><strong>{weekLabel}</strong><button aria-label="Semana siguiente" onClick={() => changeWeek(1)}>›</button></div>
             <select value={location} onChange={e => setLocation(e.target.value)}>{isAdmin && <option>Todos los locales</option>}{(data?.locations.map(l => l.name) ?? locations.slice(1)).map(l => <option key={l}>{l}</option>)}</select>
@@ -1417,7 +1417,7 @@ export default function Home() {
         {active==="Shoppers"&&<section className="schedule-card shopper-schedule" ref={shopperScheduleRef}>
           <div className="shopper-view-tabs"><button className={shopperView==="schedule"?"active":""} onClick={()=>setShopperView("schedule")}><i>▦</i><span><strong>Horarios</strong><small>Programación semanal</small></span></button><button className={shopperView==="directory"?"active":""} onClick={()=>setShopperView("directory")}><i>⌕</i><span><strong>Repositorio de shoppers</strong><small>Buscar IDs y cambiar locales</small></span></button></div>
           {shopperView==="schedule"?<>
-          <div className="schedule-title"><div><h2>Horario de shoppers</h2><p>Programación por turnos del personal de tus locales asignados.</p><span className="fill-help"><i /> Arrastra el cuadro naranja hacia arriba, abajo, izquierda o derecha para copiar.</span></div><div className="schedule-actions shopper-actions"><button className="schedule-action-button publish-action" onClick={()=>void publishWeeklyActivity(shopperCategory==="purchase"?"shopper_purchase":"shopper_delivery")}>✓ Publicar {shopperCategory==="purchase"?"compra":"entrega"}</button><button className="schedule-action-button" onClick={()=>setAddShopper(true)}>＋ Agregar shopper</button><button className="schedule-action-button" onClick={()=>setAddShopperShift(true)}>＋ Crear turno</button><button className="schedule-action-button" onClick={()=>void copyShopperWeek()}>▣ Copiar semana</button><button className="schedule-action-button image-action" onClick={()=>setShopperImageChoice(true)}>▧ Descargar imagen</button></div></div>
+          <div className="schedule-title"><div><h2>Horario de shoppers</h2><p>Programación por turnos del personal de tus locales asignados.</p><span className="fill-help"><i /> Arrastra el cuadro naranja hacia arriba, abajo, izquierda o derecha para copiar.</span></div><div className="schedule-actions shopper-actions"><button className="schedule-action-button publish-action" onClick={()=>void publishWeeklyActivity(shopperCategory==="purchase"?"shopper_purchase":"shopper_delivery")}>✓ Publicar {shopperCategory==="purchase"?"compra":"entrega"}</button><button className="schedule-action-button" onClick={()=>setAddShopper(true)}>＋ Agregar shopper</button><button className="schedule-action-button" onClick={()=>setAddShopperShift(true)}>＋ Crear turno</button><button className="schedule-action-button" onClick={()=>void copyShopperWeek()}>▣ Copiar semana</button>{shopperCategory==="purchase"&&<button className="schedule-action-button" onClick={()=>void downloadPurchaseScheduleExcel()}>⇩ Descargar Excel</button>}<button className="schedule-action-button image-action" onClick={()=>setShopperImageChoice(true)}>▧ Descargar imagen</button></div></div>
           <div className="shopper-submenu"><button className={shopperCategory==="purchase"?"active":""} onClick={()=>setShopperCategory("purchase")}>Asesores de compra</button><button className={shopperCategory==="delivery"?"active":""} onClick={()=>setShopperCategory("delivery")}>Repartidores</button></div>
           <div className="toolbar"><div className="week"><button onClick={()=>changeWeek(-1)}>‹</button><strong>{weekLabel}</strong><button onClick={()=>changeWeek(1)}>›</button></div><select value={location} onChange={e=>setLocation(e.target.value)}>{isAdmin&&<option>Todos los locales</option>}{data?.locations.map(l=><option key={l.id}>{l.name}</option>)}</select></div>
           {(()=>{
