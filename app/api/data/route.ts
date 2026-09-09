@@ -36,6 +36,22 @@ function moveDate(value:string,days:number){
   date.setDate(date.getDate()+days);
   return date.toISOString().slice(0,10);
 }
+async function loadAssignments(db:ReturnType<typeof client>){
+  const rows:any[]=[];
+  const pageSize=1000;
+  for(let from=0;;from+=pageSize){
+    const {data,error}=await db.from("assignments")
+      .select("*,roles(name,color,counts_hours)")
+      .order("work_date",{ascending:true})
+      .order("id",{ascending:true})
+      .range(from,from+pageSize-1);
+    if(error)return {data:rows,error};
+    const page=(data||[]) as any[];
+    rows.push(...page);
+    if(page.length<pageSize)break;
+  }
+  return {data:rows,error:null};
+}
 const regionalLocations=[
   ["MX. Village Plaza","Guayaquil"],["SX. Plaza Batán","Guayaquil"],
   ["SX. Villa Club","Guayaquil"],["MX. Ceibos","Guayaquil"],
@@ -71,7 +87,7 @@ export async function GET(request:NextRequest) {
     db.from("locations").select("*").eq("active",true).order("name"),
     db.from("roles").select("*").eq("active",true).order("name"),
     db.from("supervisors").select("*,locations(name,city)").order("name"),
-    db.from("assignments").select("*,roles(name,color,counts_hours)").order("work_date")
+    loadAssignments(db)
   ]);
   const failure=le||re||se||ae;if(failure)return NextResponse.json({error:failure.message},{status:400});
   return NextResponse.json({
