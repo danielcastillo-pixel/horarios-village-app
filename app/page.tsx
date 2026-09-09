@@ -134,6 +134,28 @@ async function downloadWorkbook97(workbook:XLSX.WorkBook,filename:string) {
   setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 
+async function downloadWorkbookXlsx(workbook:XLSX.WorkBook,filename:string) {
+  const bytes=XLSX.write(workbook,{bookType:"xlsx",type:"array"});
+  const blob=new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+  const file=new File([blob],filename,{type:blob.type});
+  if(navigator.share&&navigator.canShare?.({files:[file]})){
+    try{
+      await navigator.share({files:[file],title:"Horario de supervisión"});
+      return;
+    }catch(error){
+      if(error instanceof DOMException&&error.name==="AbortError")throw error;
+    }
+  }
+  const url=URL.createObjectURL(blob);
+  const link=document.createElement("a");
+  link.href=url;
+  link.download=filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+
 export default function Home() {
   const [mobileMenuOpen,setMobileMenuOpen] = useState(false);
   const [sidebarCollapsed,setSidebarCollapsed] = useState(false);
@@ -721,6 +743,139 @@ export default function Home() {
     }
   }
 
+  async function downloadSupervisorScheduleExcel() {
+    const selectedLocations=location==="Todos los locales"
+      ? [...new Set(people.map(person=>person.location))].sort((a,b)=>a.localeCompare(b,"es"))
+      : [location];
+    const populatedLocations=selectedLocations.filter(local=>people.some(person=>person.location===local));
+    if(!populatedLocations.length){setNotice("No existen supervisores para generar el horario de esta semana");return;}
+
+    const workbook=XLSX.utils.book_new();
+    const usedSheetNames=new Set<string>();
+    const border={style:"thin",color:{rgb:"B7C3D0"}};
+    const baseFont={name:"Arial",sz:10,color:{rgb:"1F2937"}};
+    const fills:Record<string,string>={blue:"BDD7EE",green:"C6E0B4",orange:"F4B183",yellow:"FFE699",purple:"D9C2E9"};
+    const safeTime=(item:Shift|null,index:0|1)=>shiftTime(item,index,"");
+    const isFree=(item:Shift|null)=>!item||item.time==="LIBRE"||["Libre","Descanso","Vacaciones"].includes(item.role);
+
+    populatedLocations.forEach(local=>{
+      const staff=people.filter(person=>person.location===local).sort((a,b)=>a.name.localeCompare(b.name,"es"));
+      const openingTimes=[...new Set(staff.flatMap(person=>person.shifts.map(item=>isFree(item)?"":safeTime(item,0))).filter(Boolean))].sort();
+      const closingTimes=[...new Set(staff.flatMap(person=>person.shifts.map(item=>isFree(item)?"":safeTime(item,1))).filter(Boolean))].sort();
+      const rows:(string|number)[][]=[];
+      rows.push(["HORARIO DE SUPERVISIÓN","","","","","","","","",""]);
+      rows.push(["","","","","","","","","",""]);
+      rows.push([`${local} · ${weekLabel} · ${staff.length} supervisor${staff.length===1?"":"es"}`,"","","","","","","","",""]);
+      rows.push(["","","","","","","","","",""]);
+      const openingHeader=rows.length;
+      rows.push(["TOTAL APERTURA SUPERVISIÓN","","",...days]);
+      openingTimes.forEach(time=>rows.push([`INGRESO ${time}`,"","",...dateKeys.map((_,day)=>staff.filter(person=>safeTime(person.shifts[day],0)===time&&!isFree(person.shifts[day])).length)]));
+      if(!openingTimes.length)rows.push(["SIN APERTURAS REGISTRADAS","","",...dateKeys.map(()=>0)]);
+      rows.push(["","","","","","","","","",""]);
+      const mainHeader=rows.length;
+      rows.push(["N.º","SUPERVISOR","LOCAL",...days]);
+      const firstStaffRow=rows.length;
+      staff.forEach((person,index)=>rows.push([index+1,person.name,person.location,...person.shifts.map(item=>item?.role??"—")]));
+      const lastStaffRow=rows.length-1;
+      rows.push(["","","","","","","","","",""]);
+      const closingHeader=rows.length;
+      rows.push(["TOTAL CIERRE SUPERVISIÓN","","",...days]);
+      closingTimes.forEach(time=>rows.push([`CIERRE ${time}`,"","",...dateKeys.map((_,day)=>staff.filter(person=>safeTime(person.shifts[day],1)===time&&!isFree(person.shifts[day])).length)]));
+      if(!closingTimes.length)rows.push(["SIN CIERRES REGISTRADOS","","",...dateKeys.map(()=>0)]);
+      rows.push(["","","","","","","","","",""]);
+      const legendHeader=rows.length;
+      rows.push(["ROL / TURNO","INGRESO","SALIDA","HORAS","","","","","",""]);
+      const legend=new Map<string,{role:string;start:string;end:string;hours:number}>();
+      staff.forEach(person=>person.shifts.forEach(item=>{
+        if(!item)return;
+        const start=isFree(item)?"—":safeTime(item,0);
+        const end=isFree(item)?"—":safeTime(item,1);
+        const key=`${item.role}|${start}|${end}`;
+        if(!legend.has(key))legend.set(key,{role:item.role,start,end,hours:shiftHours(item)});
+      }));
+      [...legend.values()].sort((a,b)=>a.start.localeCompare(b.start)||a.role.localeCompare(b.role,"es")).forEach(item=>rows.push([item.role,item.start,item.end,item.hours,"","","","","",""]));
+      rows.push([`Generado el ${new Date().toLocaleDateString("es-EC")} · TIPTI Operaciones Región Sur`,"","","","","","","","",""]);
+
+      const sheet=XLSX.utils.aoa_to_sheet(rows);
+      sheet["!merges"]=[
+        {s:{r:0,c:0},e:{r:1,c:9}},
+        {s:{r:2,c:0},e:{r:2,c:9}},
+        {s:{r:openingHeader,c:0},e:{r:openingHeader,c:2}},
+        {s:{r:closingHeader,c:0},e:{r:closingHeader,c:2}},
+        {s:{r:rows.length-1,c:0},e:{r:rows.length-1,c:9}}
+      ];
+      sheet["!cols"]=[{wch:7},{wch:32},{wch:27},...days.map(()=>({wch:14}))];
+      sheet["!rows"]=rows.map((_,index)=>({hpt:index<=1?25:index===2?22:index===mainHeader?25:index>=firstStaffRow&&index<=lastStaffRow?28:21}));
+      sheet["!autofilter"]={ref:XLSX.utils.encode_range({r:mainHeader,c:0},{r:lastStaffRow,c:9})};
+      Object.assign(sheet,{
+        "!freeze":{xSplit:3,ySplit:mainHeader+1,topLeftCell:`D${mainHeader+2}`,activePane:"bottomRight",state:"frozen"},
+        "!pageSetup":{orientation:"landscape",fitToWidth:1,fitToHeight:0,paperSize:9},
+        "!margins":{left:0.25,right:0.25,top:0.4,bottom:0.4,header:0.2,footer:0.2},
+        "!printHeader":[mainHeader+1,mainHeader+1]
+      });
+
+      const range=XLSX.utils.decode_range(sheet["!ref"]??"A1:J1");
+      for(let row=range.s.r;row<=range.e.r;row++)for(let col=range.s.c;col<=range.e.c;col++){
+        const address=XLSX.utils.encode_cell({r:row,c:col});
+        if(!sheet[address])sheet[address]={t:"s",v:""};
+        sheet[address].s={font:baseFont,alignment:{vertical:"center",horizontal:col===1||col===2?"left":"center",wrapText:true}};
+      }
+      for(let col=0;col<10;col++){
+        const title=sheet[XLSX.utils.encode_cell({r:0,c:col})];
+        if(title)title.s={fill:{fgColor:{rgb:"7030A0"}},font:{name:"Arial",sz:16,bold:true,color:{rgb:"FFFFFF"}},alignment:{horizontal:"center",vertical:"center"}};
+        const subtitle=sheet[XLSX.utils.encode_cell({r:2,c:col})];
+        if(subtitle)subtitle.s={fill:{fgColor:{rgb:"EDE7F6"}},font:{name:"Arial",sz:11,bold:true,color:{rgb:"4C1D6F"}},alignment:{horizontal:"center",vertical:"center"}};
+      }
+      [openingHeader,mainHeader,closingHeader,legendHeader].forEach(headerRow=>{
+        for(let col=0;col<10;col++){
+          const cell=sheet[XLSX.utils.encode_cell({r:headerRow,c:col})];
+          if(cell)cell.s={fill:{fgColor:{rgb:headerRow===legendHeader?"7030A0":"1F4E78"}},font:{name:"Arial",sz:10,bold:true,color:{rgb:"FFFFFF"}},alignment:{horizontal:"center",vertical:"center",wrapText:true},border:{top:border,bottom:border,left:border,right:border}};
+        }
+      });
+      const styleSummary=(header:number,count:number)=>[...Array(count||1)].forEach((_,offset)=>{
+        const row=header+1+offset;
+        for(let col=0;col<10;col++){
+          const cell=sheet[XLSX.utils.encode_cell({r:row,c:col})];
+          if(cell)cell.s={fill:{fgColor:{rgb:col<3?"FFF2CC":"FFFFFF"}},font:{...baseFont,bold:col===0},alignment:{horizontal:col===0?"left":"center",vertical:"center"},border:{top:border,bottom:border,left:border,right:border}};
+        }
+      });
+      styleSummary(openingHeader,openingTimes.length);
+      styleSummary(closingHeader,closingTimes.length);
+      staff.forEach((person,index)=>{
+        const row=firstStaffRow+index;
+        for(let col=0;col<10;col++){
+          const cell=sheet[XLSX.utils.encode_cell({r:row,c:col})];
+          if(!cell)continue;
+          const shiftItem=col>=3?person.shifts[col-3]:null;
+          const fill=shiftItem?(fills[shiftItem.tone]??"E5E7EB"):(col<3?(index%2?"F7F9FC":"FFFFFF"):"F2F4F7");
+          cell.s={fill:{fgColor:{rgb:fill}},font:{...baseFont,bold:col===1||col>=3},alignment:{horizontal:col===1||col===2?"left":"center",vertical:"center",wrapText:true},border:{top:border,bottom:border,left:border,right:border}};
+        }
+      });
+      for(let row=legendHeader+1;row<rows.length-1;row++)for(let col=0;col<4;col++){
+        const cell=sheet[XLSX.utils.encode_cell({r:row,c:col})];
+        if(cell)cell.s={fill:{fgColor:{rgb:row%2?"F7F9FC":"FFFFFF"}},font:{...baseFont,bold:col===0},alignment:{horizontal:col===0?"left":"center",vertical:"center"},border:{top:border,bottom:border,left:border,right:border},numFmt:col===3?'0.00 "h"':undefined};
+      }
+      const footer=sheet[XLSX.utils.encode_cell({r:rows.length-1,c:0})];
+      if(footer)footer.s={font:{name:"Arial",sz:9,italic:true,color:{rgb:"667085"}},alignment:{horizontal:"right",vertical:"center"}};
+
+      let sheetName=local.replace(/[\\/*?:[\]]/g," ").trim().slice(0,31)||"Horario";
+      let suffix=2;
+      while(usedSheetNames.has(sheetName)){const tail=` ${suffix++}`;sheetName=`${sheetName.slice(0,31-tail.length)}${tail}`;}
+      usedSheetNames.add(sheetName);
+      XLSX.utils.book_append_sheet(workbook,sheet,sheetName);
+    });
+
+    const scope=location==="Todos los locales"?"Region_Sur":location.replace(/[^a-z0-9]+/gi,"_");
+    try{
+      setNotice("Generando Excel profesional del horario...");
+      await downloadWorkbookXlsx(workbook,`Horario_Supervision_${scope}_${weekStart}.xlsx`);
+      setNotice(`✓ Excel profesional generado (${populatedLocations.length} ${populatedLocations.length===1?"local":"locales"})`);
+    }catch(error){
+      if(error instanceof DOMException&&error.name==="AbortError")setNotice("Se canceló la descarga del Excel");
+      else setNotice("Error: no se pudo generar el Excel del horario");
+    }
+  }
+
   function changeWeek(offset:number) {
     const d = new Date(`${weekStart}T12:00:00`);
     d.setDate(d.getDate()+offset*7);
@@ -1243,7 +1398,7 @@ export default function Home() {
         </section>}
 
         {active === "Horarios" && <section className="schedule-card" ref={scheduleRef}>
-          <div className="schedule-title"><div><h2>Horario semanal</h2><p>Puedes editar nombres, quitar filas y modificar los turnos de tus locales asignados. Las semanas anteriores conservan su historial.</p><span className="fill-help"><i /> Arrastra el cuadro naranja hacia arriba, abajo, izquierda o derecha para copiar.</span></div><div className="schedule-actions"><button className="schedule-action-button publish-action" onClick={()=>void publishWeeklyActivity("supervisor_schedule")}>✓ Publicar semana</button><button className="schedule-action-button" onClick={() => setCreate("supervisor")}>＋ Agregar supervisor</button><button className="schedule-action-button" onClick={()=>void copyWeek()}>▣ Copiar semana</button><button className="schedule-action-button image-action" onClick={()=>void downloadScheduleImage()}>▧ Descargar imagen</button></div></div>
+          <div className="schedule-title"><div><h2>Horario semanal</h2><p>Puedes editar nombres, quitar filas y modificar los turnos de tus locales asignados. Las semanas anteriores conservan su historial.</p><span className="fill-help"><i /> Arrastra el cuadro naranja hacia arriba, abajo, izquierda o derecha para copiar.</span></div><div className="schedule-actions"><button className="schedule-action-button publish-action" onClick={()=>void publishWeeklyActivity("supervisor_schedule")}>✓ Publicar semana</button><button className="schedule-action-button" onClick={() => setCreate("supervisor")}>＋ Agregar supervisor</button><button className="schedule-action-button" onClick={()=>void copyWeek()}>▣ Copiar semana</button><button className="schedule-action-button" onClick={()=>void downloadSupervisorScheduleExcel()}>⇩ Descargar Excel</button><button className="schedule-action-button image-action" onClick={()=>void downloadScheduleImage()}>▧ Descargar imagen</button></div></div>
           <div className="toolbar">
             <div className="week"><button aria-label="Semana anterior" onClick={() => changeWeek(-1)}>‹</button><strong>{weekLabel}</strong><button aria-label="Semana siguiente" onClick={() => changeWeek(1)}>›</button></div>
             <select value={location} onChange={e => setLocation(e.target.value)}>{isAdmin && <option>Todos los locales</option>}{(data?.locations.map(l => l.name) ?? locations.slice(1)).map(l => <option key={l}>{l}</option>)}</select>
