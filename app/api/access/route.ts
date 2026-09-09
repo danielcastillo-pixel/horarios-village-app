@@ -25,6 +25,7 @@ async function requireAdmin(request:NextRequest) {
   return profile?.app_role==="admin"&&profile?.active ? user : null;
 }
 export async function GET(request:NextRequest) {
+  if(!await requireAdmin(request))return NextResponse.json({error:"Solo el administrador puede consultar los accesos."},{status:403});
   const db=client(request);
   const [{data,error},{data:grants,error:grantsError},{data:locations}]=await Promise.all([
     db.from("profiles").select("*").order("email"),
@@ -48,7 +49,7 @@ export async function GET(request:NextRequest) {
   }
   const safeGrants=grantsError?[]:(grants||[]);
   const locationNameById=new Map((locations||[]).map((location:any)=>[Number(location.id),location.name]));
-  return NextResponse.json({users:(data||[]).filter((x:any)=>x.app_role!=="admin").map((x:any)=>{
+  return NextResponse.json({users:(data||[]).map((x:any)=>{
     const requestedNames=((authById.get(x.id)?.user_metadata?.requested_location_names||[]) as unknown[]).map(String).filter(Boolean);
     const requested=requestedNames.map(name=>{
       const match=(locations||[]).find((location:any)=>location.name===name);
@@ -79,35 +80,61 @@ export async function POST(request:NextRequest) {
     if(error)return NextResponse.json({error:error.message},{status:400});
     return NextResponse.json({ok:true});
   }
-  if(!await requireAdmin(request))return NextResponse.json({error:"Solo el administrador puede realizar esta acción."},{status:403});
+  const actor=await requireAdmin(request);
+  if(!actor)return NextResponse.json({error:"Solo el administrador puede realizar esta acción."},{status:403});
   const locationIds=[...new Set((body.locationIds||[]).map(Number).filter(Boolean))] as number[];
+  const requestedRole=body.role==="admin"?"admin":"supervisor";
+  const canRemoveAdmin=async(targetId:string)=>{
+    if(targetId===actor.id)return {allowed:false,error:"Tu propia cuenta administrativa no puede bloquearse ni cambiarse a supervisor."};
+    const {count,error}=await db.from("profiles").select("id",{count:"exact",head:true}).eq("app_role","admin").eq("active",true);
+    if(error)return {allowed:false,error:error.message};
+    if((count??0)<=1)return {allowed:false,error:"Debe permanecer al menos un administrador activo."};
+    return {allowed:true,error:""};
+  };
   if(body.action==="save"){
     const {data:user,error:findError}=await db.from("profiles").select("id").eq("email",String(body.email).toLowerCase()).maybeSingle();
     if(findError)return NextResponse.json({error:findError.message},{status:400});
     if(!user)return NextResponse.json({error:"El usuario debe crear su cuenta primero desde la página de acceso."},{status:400});
-    if(!locationIds.length)return NextResponse.json({error:"Selecciona al menos un local."},{status:400});
-    const {error}=await db.from("profiles").update({full_name:body.name,location_id:locationIds[0],app_role:"supervisor",active:true}).eq("id",user.id);
+    if(requestedRole==="supervisor"&&!locationIds.length)return NextResponse.json({error:"Selecciona al menos un local."},{status:400});
+    const {error}=await db.from("profiles").update({full_name:body.name,location_id:requestedRole==="admin"?null:locationIds[0],app_role:requestedRole,active:true}).eq("id",user.id);
     if(error)return NextResponse.json({error:error.message},{status:400});
     const {error:deleteError}=await db.from("profile_locations").delete().eq("profile_id",user.id);
     if(deleteError)return NextResponse.json({error:deleteError.message},{status:400});
-    const {error:grantError}=await db.from("profile_locations").insert(locationIds.map(location_id=>({profile_id:user.id,location_id})));
-    if(grantError)return NextResponse.json({error:grantError.message},{status:400});
+    if(requestedRole==="supervisor"){
+      const {error:grantError}=await db.from("profile_locations").insert(locationIds.map(location_id=>({profile_id:user.id,location_id})));
+      if(grantError)return NextResponse.json({error:grantError.message},{status:400});
+    }
   } else if(body.action==="toggle"){
+    const {data:target,error:targetError}=await db.from("profiles").select("app_role,active").eq("id",body.id).maybeSingle();
+    if(targetError||!target)return NextResponse.json({error:targetError?.message??"No se encontró la cuenta."},{status:404});
+    if(target.app_role==="admin"&&target.active&& !Boolean(body.active)){
+      const protection=await canRemoveAdmin(String(body.id));
+      if(!protection.allowed)return NextResponse.json({error:protection.error},{status:400});
+    }
     const {error}=await db.from("profiles").update({active:Boolean(body.active)}).eq("id",body.id);
     if(error)return NextResponse.json({error:error.message},{status:400});
   } else if(body.action==="update"){
-    if(!locationIds.length)return NextResponse.json({error:"Selecciona al menos un local."},{status:400});
+    const {data:target,error:targetError}=await db.from("profiles").select("app_role,active").eq("id",body.id).maybeSingle();
+    if(targetError||!target)return NextResponse.json({error:targetError?.message??"No se encontró la cuenta."},{status:404});
+    const nextActive=Boolean(body.active);
+    if(target.app_role==="admin"&&(requestedRole!=="admin"||!nextActive)){
+      const protection=await canRemoveAdmin(String(body.id));
+      if(!protection.allowed)return NextResponse.json({error:protection.error},{status:400});
+    }
+    if(requestedRole==="supervisor"&&!locationIds.length)return NextResponse.json({error:"Selecciona al menos un local."},{status:400});
     const {error}=await db.from("profiles").update({
       full_name:String(body.name||"").trim(),
-      location_id:locationIds[0],
-      app_role:"supervisor",
-      active:Boolean(body.active)
+      location_id:requestedRole==="admin"?null:locationIds[0],
+      app_role:requestedRole,
+      active:nextActive
     }).eq("id",body.id);
     if(error)return NextResponse.json({error:error.message},{status:400});
     const {error:deleteError}=await db.from("profile_locations").delete().eq("profile_id",body.id);
     if(deleteError)return NextResponse.json({error:deleteError.message},{status:400});
-    const {error:grantError}=await db.from("profile_locations").insert(locationIds.map(location_id=>({profile_id:body.id,location_id})));
-    if(grantError)return NextResponse.json({error:grantError.message},{status:400});
+    if(requestedRole==="supervisor"){
+      const {error:grantError}=await db.from("profile_locations").insert(locationIds.map(location_id=>({profile_id:body.id,location_id})));
+      if(grantError)return NextResponse.json({error:grantError.message},{status:400});
+    }
   } else if(body.action==="resetPassword"){
     const service=serviceClient();
     const {data:{user},error:findError}=await service.auth.admin.getUserById(String(body.id||""));

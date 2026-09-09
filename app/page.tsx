@@ -187,8 +187,10 @@ export default function Home() {
   const [accessState, setAccessState] = useState<"loading"|"authorized"|"signin"|"denied">("loading");
   const [accessUsers, setAccessUsers] = useState<AccessUserRow[]>([]);
   const [accessFilter,setAccessFilter]=useState<"pending"|"active"|"inactive">("pending");
+  const [newAccessRole,setNewAccessRole]=useState<"supervisor"|"admin">("supervisor");
   const [editAccessUser, setEditAccessUser] = useState<AccessUserRow | null>(null);
   const [editAccessLocations, setEditAccessLocations] = useState<number[]>([]);
+  const [editAccessRole,setEditAccessRole]=useState<"supervisor"|"admin">("supervisor");
   const [resettingAccessId,setResettingAccessId]=useState<string|null>(null);
   const [temporaryAccess,setTemporaryAccess]=useState<{name:string;email:string;password:string}|null>(null);
   const scheduleRef=useRef<HTMLElement|null>(null);
@@ -1225,41 +1227,50 @@ export default function Home() {
     }
   }
 
-  async function saveAccessUser(form: FormData) {
+  async function saveAccessUser(form: FormData):Promise<boolean> {
+    const role=String(form.get("role"))==="admin"?"admin":"supervisor";
+    if(role==="admin"&&!window.confirm("Esta cuenta tendrá control total de la Región Sur, accesos, reportes y configuraciones. ¿Deseas continuar?"))return false;
     const response = await apiFetch("/api/access",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
-      action:"save",name:form.get("name"),email:form.get("email"),locationIds:form.getAll("locationIds").map(Number)
+      action:"save",name:form.get("name"),email:form.get("email"),role,locationIds:form.getAll("locationIds").map(Number)
     })});
     if (response.ok) {
-      setNotice("✓ Usuario registrado como supervisor");
+      setNotice(role==="admin"?"✓ Nueva cuenta administradora activada":"✓ Usuario registrado como supervisor");
+      setNewAccessRole("supervisor");
       await loadAccessUsers();
+      return true;
     } else {
       const problem = await response.json().catch(()=>({error:"No se pudo registrar"})) as {error?:string};
       setNotice(`Error: ${problem.error ?? "No se pudo registrar"}`);
+      return false;
     }
   }
 
   async function toggleAccessUser(user:AccessUserRow) {
+    if(user.role==="admin"&&user.active===1&&!window.confirm(`¿Bloquear el acceso administrativo de ${user.name}?`))return;
     const response = await apiFetch("/api/access",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
       action:"toggle",id:user.id,active:user.active===1?0:1
     })});
     if (response.ok) {
       setNotice(user.active===1?"✓ Acceso bloqueado":"✓ Acceso reactivado");
       await loadAccessUsers();
-    }
+    } else {const problem=await response.json().catch(()=>({error:"No se pudo cambiar el acceso"})) as {error?:string};setNotice(`Error: ${problem.error??"No se pudo cambiar el acceso"}`);}
   }
 
   async function updateAccessUser(form:FormData) {
     if (!editAccessUser) return;
+    const editingOwnAdministrator=editAccessUser.role==="admin"&&editAccessUser.email.toLowerCase()===data?.currentUser.email.toLowerCase();
+    if(editAccessRole!==editAccessUser.role&&!window.confirm(editAccessRole==="admin"?"Esta cuenta tendrá control total de la aplicación. ¿Convertirla en administradora?":"Esta cuenta perderá el acceso administrativo. ¿Convertirla en supervisora?"))return;
     const response = await apiFetch("/api/access",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
       action:"update",
       id:editAccessUser.id,
       name:String(form.get("name") ?? "").trim(),
+      role:editAccessRole,
       locationIds:editAccessLocations,
-      active:Number(form.get("active"))
+      active:editingOwnAdministrator?1:Number(form.get("active"))
     })});
     if (response.ok) {
       setEditAccessUser(null);
-      setNotice("✓ Usuario y local actualizados correctamente");
+      setNotice(editAccessRole==="admin"?"✓ Cuenta administradora actualizada":"✓ Usuario y locales actualizados correctamente");
       await loadAccessUsers();
     } else {
       const problem = await response.json().catch(()=>({error:"No se pudo actualizar"})) as {error?:string};
@@ -1330,9 +1341,10 @@ export default function Home() {
 
   const isAdmin = data?.currentUser.role === "admin";
   const visibleNav = isAdmin ? adminNav : supervisorNav;
-  const pendingAccessUsers=accessUsers.filter(user=>user.active===0&&!user.location_ids.length);
+  const pendingAccessUsers=accessUsers.filter(user=>user.active===0&&user.role!=="admin"&&!user.location_ids.length);
   const activeAccessUsers=accessUsers.filter(user=>user.active===1);
-  const inactiveAccessUsers=accessUsers.filter(user=>user.active===0&&user.location_ids.length>0);
+  const inactiveAccessUsers=accessUsers.filter(user=>user.active===0&&(user.role==="admin"||user.location_ids.length>0));
+  const activeAdministratorCount=activeAccessUsers.filter(user=>user.role==="admin").length;
   const visibleAccessUsers=accessFilter==="pending"?pendingAccessUsers:accessFilter==="active"?activeAccessUsers:inactiveAccessUsers;
 
   return (
@@ -1474,11 +1486,12 @@ export default function Home() {
         </section>}
 
         {active === "Accesos" && isAdmin && <section className="management-card">
-          <div className="management-head"><div><h2>Administración de accesos</h2><p>Aprueba solicitudes, administra usuarios activos y reactiva accesos inactivos.</p></div><span className="admin-lock">Administrador: solo tú</span></div>
-          <form className="access-form" onSubmit={e=>{e.preventDefault();void saveAccessUser(new FormData(e.currentTarget));e.currentTarget.reset();}}>
-            <label>Nombre completo<input name="name" required placeholder="Nombre del supervisor" /></label>
+          <div className="management-head"><div><h2>Administración de accesos</h2><p>Aprueba solicitudes, administra usuarios activos y asigna permisos de administrador.</p></div><span className="admin-lock">{activeAdministratorCount} administrador{activeAdministratorCount===1?"":"es"} activo{activeAdministratorCount===1?"":"s"}</span></div>
+          <form className="access-form" onSubmit={e=>{e.preventDefault();const form=e.currentTarget;void saveAccessUser(new FormData(form)).then(saved=>{if(saved)form.reset();});}}>
+            <label>Nombre completo<input name="name" required placeholder="Nombre del usuario" /></label>
             <label>Correo de acceso<input name="email" type="email" required placeholder="usuario@correo.com" /></label>
-            <label>Locales permitidos<select name="locationIds" required multiple size={4}>{data?.locations.map(l=><option key={l.id} value={l.id}>{l.name} · {l.city}</option>)}</select><small>Usa Ctrl para elegir varios</small></label>
+            <label>Rol<select name="role" value={newAccessRole} onChange={event=>setNewAccessRole(event.target.value as "supervisor"|"admin")}><option value="supervisor">Supervisor</option><option value="admin">Administrador</option></select><small>{newAccessRole==="admin"?"Acceso total a la aplicación":"Acceso limitado por locales"}</small></label>
+            <label>Locales permitidos<select name="locationIds" required={newAccessRole==="supervisor"} disabled={newAccessRole==="admin"} multiple size={4}>{data?.locations.map(l=><option key={l.id} value={l.id}>{l.name} · {l.city}</option>)}</select><small>{newAccessRole==="admin"?"No necesita seleccionar locales":"Usa Ctrl para elegir varios"}</small></label>
             <button className="primary">＋ Registrar usuario</button>
           </form>
           <div className="access-tabs" role="tablist" aria-label="Estado de usuarios">
@@ -1488,18 +1501,18 @@ export default function Home() {
           </div>
           <div className="access-list">
             <div className="access-row access-head"><span>Usuario</span><span>Correo</span><span>Local permitido</span><span>Acciones</span></div>
-            {visibleAccessUsers.length ? visibleAccessUsers.map(user=>{const pending=user.active===0&&!user.location_ids.length;return <div className={`access-row ${pending?"pending-access":""}`} key={user.id}>
-              <strong>{user.name}{pending?<small className="pending-badge">Pendiente</small>:user.active===1?<small className="active-badge">Activo</small>:<small className="inactive-badge">Inactivo</small>}</strong><span>{user.email}</span><span>{pending&&user.requested_location_names.length ? `Solicita: ${user.requested_location_names.join(", ")}` : user.location_names.length ? user.location_names.join(", ") : "Sin asignar"}</span>
+            {visibleAccessUsers.length ? visibleAccessUsers.map(user=>{const pending=user.active===0&&user.role!=="admin"&&!user.location_ids.length;const isSelfAdmin=user.role==="admin"&&user.email.toLowerCase()===data?.currentUser.email.toLowerCase();return <div className={`access-row ${pending?"pending-access":""}`} key={user.id}>
+              <strong>{user.name}<small className={user.role==="admin"?"administrator-badge":"supervisor-badge"}>{user.role==="admin"?"Administrador":"Supervisor"}</small>{pending?<small className="pending-badge">Pendiente</small>:user.active===1?<small className="active-badge">Activo</small>:<small className="inactive-badge">Inactivo</small>}</strong><span>{user.email}</span><span>{user.role==="admin"?"Acceso total · Región Sur":pending&&user.requested_location_names.length ? `Solicita: ${user.requested_location_names.join(", ")}` : user.location_names.length ? user.location_names.join(", ") : "Sin asignar"}</span>
               <div className="access-actions">
-                <button className="access-edit" onClick={()=>{setEditAccessUser(user);setEditAccessLocations(user.location_ids.length?user.location_ids:user.requested_location_ids)}}>{pending?"Revisar solicitud":"Editar"}</button>
-                {!pending&&<button className="access-reset" disabled={resettingAccessId===user.id} onClick={()=>void resetAccessPassword(user)}>{resettingAccessId===user.id?"Generando…":"Restablecer clave"}</button>}
-                {!pending&&<button className={user.active===1?"access-active":"access-blocked"} onClick={()=>void toggleAccessUser(user)}>{user.active===1?"Bloquear":"Reactivar"}</button>}
+                <button className="access-edit" onClick={()=>{setEditAccessUser(user);setEditAccessRole(user.role==="admin"?"admin":"supervisor");setEditAccessLocations(user.location_ids.length?user.location_ids:user.requested_location_ids)}}>{pending?"Revisar solicitud":"Editar"}</button>
+                {!pending&&user.role!=="admin"&&<button className="access-reset" disabled={resettingAccessId===user.id} onClick={()=>void resetAccessPassword(user)}>{resettingAccessId===user.id?"Generando…":"Restablecer clave"}</button>}
+                {!pending&&!isSelfAdmin&&<button className={user.active===1?"access-active":"access-blocked"} onClick={()=>void toggleAccessUser(user)}>{user.active===1?"Bloquear":"Reactivar"}</button>}
               </div>
             </div>}) : <div className="empty-report">{accessFilter==="pending"?"No existen solicitudes pendientes.":accessFilter==="active"?"No existen usuarios activos.":"No existen usuarios inactivos."}</div>}
           </div>
         </section>}
 
-        {active === "Configuración" && <section className="management-card"><div className="management-head"><div><h2>Configuración administrativa</h2><p>Tienes acceso total a los catálogos y a toda la información almacenada.</p></div></div><div className="settings-grid"><article><strong>Datos persistentes</strong><p>Los locales, supervisores, roles y horarios se guardan en la base del sistema.</p></article><article><strong>Acceso de administrador</strong><p>Daniel Castillo · Control total del sistema.</p></article><article><strong>Historial</strong><p>Las asignaciones permanecen disponibles para reportes y consultas futuras.</p></article></div></section>}
+        {active === "Configuración" && <section className="management-card"><div className="management-head"><div><h2>Configuración administrativa</h2><p>Tienes acceso total a los catálogos y a toda la información almacenada.</p></div></div><div className="settings-grid"><article><strong>Datos persistentes</strong><p>Los locales, supervisores, roles y horarios se guardan en la base del sistema.</p></article><article><strong>Accesos administrativos</strong><p>Las cuentas administradoras activas tienen control total de la Región Sur.</p></article><article><strong>Historial</strong><p>Las asignaciones permanecen disponibles para reportes y consultas futuras.</p></article></div></section>}
       </section>
 
       {notice && <button className="toast" onClick={() => setNotice("")}>{notice} ×</button>}
@@ -1531,9 +1544,10 @@ export default function Home() {
         <h2>{editAccessUser.name}</h2>
         <p>{editAccessUser.email}</p>
         <label>Nombre completo<input name="name" required defaultValue={editAccessUser.name} /></label>
-        <fieldset className="location-checks"><legend>Locales permitidos</legend>{data?.locations.map(l=><label key={l.id}><input type="checkbox" checked={editAccessLocations.includes(l.id)} onChange={e=>setEditAccessLocations(ids=>e.target.checked?[...ids,l.id]:ids.filter(id=>id!==l.id))} /> <span>{l.name} · {l.city}</span></label>)}</fieldset>
-        <label>Estado<select name="active" defaultValue={editAccessUser.active===0&&!editAccessUser.location_ids.length?1:editAccessUser.active}><option value={1}>Activo</option><option value={0}>Bloqueado</option></select></label>
-        <button className="primary save" disabled={!editAccessLocations.length}>{editAccessUser.active===0&&!editAccessUser.location_ids.length?"Aprobar acceso":"Guardar cambios"}</button>
+        <label>Rol de acceso<select name="role" value={editAccessRole} disabled={editAccessUser.role==="admin"&&editAccessUser.email.toLowerCase()===data?.currentUser.email.toLowerCase()} onChange={event=>setEditAccessRole(event.target.value as "supervisor"|"admin")}><option value="supervisor">Supervisor</option><option value="admin">Administrador</option></select></label>
+        {editAccessRole==="admin"?<div className="administrator-access-notice"><strong>Acceso administrativo total</strong><span>Podrá administrar todos los locales, usuarios, reportes, autorizaciones y configuraciones.</span></div>:<fieldset className="location-checks"><legend>Locales permitidos</legend>{data?.locations.map(l=><label key={l.id}><input type="checkbox" checked={editAccessLocations.includes(l.id)} onChange={e=>setEditAccessLocations(ids=>e.target.checked?[...ids,l.id]:ids.filter(id=>id!==l.id))} /> <span>{l.name} · {l.city}</span></label>)}</fieldset>}
+        <label>Estado<select name="active" disabled={editAccessUser.role==="admin"&&editAccessUser.email.toLowerCase()===data?.currentUser.email.toLowerCase()} defaultValue={editAccessUser.active===0&&!editAccessUser.location_ids.length?1:editAccessUser.active}><option value={1}>Activo</option><option value={0}>Bloqueado</option></select></label>
+        <button className="primary save" disabled={editAccessRole==="supervisor"&&!editAccessLocations.length}>{editAccessUser.active===0&&editAccessUser.role!=="admin"&&!editAccessUser.location_ids.length?"Aprobar acceso":"Guardar cambios"}</button>
       </form></div>}
       {temporaryAccess&&<div className="modal-backdrop" onMouseDown={()=>setTemporaryAccess(null)}><div className="modal temporary-password-modal" role="dialog" aria-modal="true" aria-labelledby="temporary-password-title" onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" onClick={()=>setTemporaryAccess(null)}>×</button><span className="temporary-key-icon">⚿</span><span className="modal-kicker">CONTRASEÑA TEMPORAL</span><h2 id="temporary-password-title">{temporaryAccess.name}</h2><p>Comparte estos datos de forma privada. La contraseña se mostrará únicamente en esta ventana y el usuario deberá cambiarla al ingresar.</p><div className="temporary-credential"><small>Correo</small><strong>{temporaryAccess.email}</strong></div><div className="temporary-credential password"><small>Contraseña temporal</small><code>{temporaryAccess.password}</code><button type="button" onClick={async()=>{await navigator.clipboard.writeText(temporaryAccess.password);setNotice("✓ Contraseña temporal copiada")}}>Copiar</button></div><button type="button" className="primary save" onClick={()=>setTemporaryAccess(null)}>Entendido, cerrar</button></div></div>}
       {modal && <div className="modal-backdrop" onMouseDown={() => setModal(null)}><form className="modal" onSubmit={e => {e.preventDefault(); saveShift(new FormData(e.currentTarget));}} onMouseDown={e => e.stopPropagation()}>
