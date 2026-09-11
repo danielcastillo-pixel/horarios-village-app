@@ -35,7 +35,7 @@ function weeksForMonth(value:string){
 function inWeek(date:string,week:string){return date>=week&&date<=moveDate(week,6);}
 function progressClass(count:number){return count>=WEEKLY_GOAL?"complete":count>0?"progress":"pending";}
 
-export default function B2BClientRegistry({locations,currentUser,apiFetch,setNotice}:Props){
+export default function B2BClientRegistry({currentUser,apiFetch,setNotice}:Props){
   const today=new Date().toLocaleDateString("en-CA");
   const currentWeek=mondayFor(today);
   const [contacts,setContacts]=useState<ContactRow[]>([]);
@@ -46,9 +46,11 @@ export default function B2BClientRegistry({locations,currentUser,apiFetch,setNot
   const [formOpen,setFormOpen]=useState(false);
   const [formVersion,setFormVersion]=useState(0);
   const [editing,setEditing]=useState<ContactRow|null>(null);
-  const [selectedStores,setSelectedStores]=useState<string[]>([]);
+  const [storesConsumed,setStoresConsumed]=useState("");
   const [weekStart,setWeekStart]=useState(currentWeek);
   const [selectedMonth,setSelectedMonth]=useState(today.slice(0,7));
+  const [reportStart,setReportStart]=useState(`${today.slice(0,7)}-01`);
+  const [reportEnd,setReportEnd]=useState(today);
   const [query,setQuery]=useState("");
   const [typeFilter,setTypeFilter]=useState<InstitutionType|"all">("all");
   const isAdmin=currentUser.role==="admin";
@@ -92,9 +94,9 @@ export default function B2BClientRegistry({locations,currentUser,apiFetch,setNot
     return matchesType&&matchesText;
   }),[contacts,query,typeFilter]);
 
-  function openCreate(){setEditing(null);setSelectedStores([]);setFormVersion(value=>value+1);setFormOpen(true);}
-  function openEdit(contact:ContactRow){setEditing(contact);setSelectedStores(contact.store_names||[]);setFormVersion(value=>value+1);setFormOpen(true);requestAnimationFrame(()=>document.querySelector(".b2b-form-card")?.scrollIntoView({behavior:"smooth",block:"start"}));}
-  function closeForm(){setFormOpen(false);setEditing(null);setSelectedStores([]);}
+  function openCreate(){setEditing(null);setStoresConsumed("");setFormVersion(value=>value+1);setFormOpen(true);}
+  function openEdit(contact:ContactRow){setEditing(contact);setStoresConsumed((contact.store_names||[]).join(", "));setFormVersion(value=>value+1);setFormOpen(true);requestAnimationFrame(()=>document.querySelector(".b2b-form-card")?.scrollIntoView({behavior:"smooth",block:"start"}));}
+  function closeForm(){setFormOpen(false);setEditing(null);setStoresConsumed("");}
 
   async function save(event:React.FormEvent<HTMLFormElement>){
     event.preventDefault();if(saving)return;setSaving(true);
@@ -103,7 +105,7 @@ export default function B2BClientRegistry({locations,currentUser,apiFetch,setNot
       const response=await apiFetch("/api/b2b-clients",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
         action:"save",id:editing?.id,institutionType:form.get("institutionType"),institutionName:form.get("institutionName"),
         contactDate:form.get("contactDate"),sector:form.get("sector"),contactPhone:form.get("contactPhone"),
-        email:form.get("email"),storeNames:selectedStores,additionalComments:form.get("additionalComments")
+        email:form.get("email"),storeNames:storesConsumed.split(",").map(value=>value.trim()).filter(Boolean),additionalComments:form.get("additionalComments")
       })});
       const payload=await response.json().catch(()=>({error:"No se pudo guardar"})) as {error?:string};
       if(!response.ok)throw new Error(payload.error||"No se pudo guardar el cliente");
@@ -120,50 +122,55 @@ export default function B2BClientRegistry({locations,currentUser,apiFetch,setNot
     setNotice("✓ Registro B2B eliminado");await load();
   }
 
-  function downloadMonthlyReport(){
-    if(!isAdmin||!monthWeeks.length)return;
-    const headers=["Supervisor",...monthWeeks.map(week=>`${shortDate(week)}–${shortDate(moveDate(week,6))}`),"Contactos","Semanas cumplidas","Cumplimiento"];
-    const summaryRows=monthlyRows.map(row=>[
-      row.name,...row.counts.map((count,index)=>monthWeeks[index]>currentWeek?"No iniciada":`${count}/${WEEKLY_GOAL}`),
-      row.total,`${row.completed}/${row.elapsed}`,row.percentage/100
+  function downloadClientReport(){
+    if(!isAdmin)return;
+    if(!reportStart||!reportEnd){setNotice("Error: Selecciona la fecha inicial y final del reporte");return;}
+    if(reportStart>reportEnd){setNotice("Error: La fecha inicial no puede ser posterior a la fecha final");return;}
+    const selectedContacts=contacts.filter(contact=>contact.contact_date>=reportStart&&contact.contact_date<=reportEnd).sort((a,b)=>a.contact_date.localeCompare(b.contact_date)||a.institution_name.localeCompare(b.institution_name,"es"));
+    if(!selectedContacts.length){setNotice("No existen clientes registrados en las fechas seleccionadas");return;}
+    const headers=["Tipo de Institución","Nombre de la Institución","Fecha","Sector","# Contacto","Correo","Tiendas donde Consume","Comentarios Adicionales"];
+    const rows=selectedContacts.map(contact=>[
+      institutionLabels[contact.institution_type],contact.institution_name,new Date(`${contact.contact_date}T12:00:00`),contact.sector,
+      contact.contact_phone,contact.email,contact.store_names.join(", "),contact.additional_comments
     ]);
-    const summary=XLSX.utils.aoa_to_sheet([["TIPTI Operaciones | Control mensual de clientes B2B"],[`Mes: ${monthLabel(selectedMonth)} · Meta semanal: ${WEEKLY_GOAL} contactos por supervisor`],[],headers,...summaryRows]);
-    summary["!merges"]=[{s:{r:0,c:0},e:{r:0,c:headers.length-1}},{s:{r:1,c:0},e:{r:1,c:headers.length-1}}];
-    summary["!cols"]=[{wch:30},...monthWeeks.map(()=>({wch:18})),{wch:12},{wch:18},{wch:15}];
-    summary["!autofilter"]={ref:XLSX.utils.encode_range({s:{r:3,c:0},e:{r:Math.max(3,summaryRows.length+3),c:headers.length-1}})};
-    for(let column=0;column<headers.length;column++){
-      for(const row of [0,1]){
-        const cell=summary[XLSX.utils.encode_cell({r:row,c:column})]||(summary[XLSX.utils.encode_cell({r:row,c:column})]={t:"s",v:""});
-        cell.s={fill:{fgColor:{rgb:row===0?"102F4D":"EAF0F5"}},font:{bold:true,color:{rgb:row===0?"FFFFFF":"102F4D"},sz:row===0?16:11},alignment:{horizontal:"center",vertical:"center"}};
-      }
-      const header=summary[XLSX.utils.encode_cell({r:3,c:column})];
-      if(header)header.s={fill:{fgColor:{rgb:"F97316"}},font:{bold:true,color:{rgb:"FFFFFF"}},alignment:{horizontal:"center",vertical:"center",wrapText:true}};
+    const sheet=XLSX.utils.aoa_to_sheet([
+      ["TIPTI Operaciones | Registro de clientes B2B"],
+      [`Periodo: ${dateLabel(reportStart)} — ${dateLabel(reportEnd)}`],
+      [],headers,...rows
+    ],{cellDates:true});
+    sheet["!merges"]=[{s:{r:0,c:0},e:{r:0,c:7}},{s:{r:1,c:0},e:{r:1,c:7}}];
+    sheet["!cols"]=[{wch:22},{wch:34},{wch:14},{wch:26},{wch:18},{wch:32},{wch:44},{wch:60}];
+    sheet["!rows"]=[{hpt:27},{hpt:21},{hpt:8},{hpt:34},...rows.map(()=>({hpt:30}))];
+    sheet["!autofilter"]={ref:XLSX.utils.encode_range({s:{r:3,c:0},e:{r:rows.length+3,c:7}})};
+    const thinBorder={top:{style:"thin",color:{rgb:"D9E1E8"}},right:{style:"thin",color:{rgb:"D9E1E8"}},bottom:{style:"thin",color:{rgb:"D9E1E8"}},left:{style:"thin",color:{rgb:"D9E1E8"}}};
+    const categoryColors:Record<InstitutionType,{fill:string;font:string}>={
+      salud:{fill:"DDF4E8",font:"147453"},ferreteria:{fill:"FDE2DE",font:"B52B24"},papeleria:{fill:"ECE3CF",font:"72501E"},belleza:{fill:"EADDF7",font:"6D3997"},b2b:{fill:"DDEAF7",font:"245D95"}
+    };
+    for(let column=0;column<8;column++){
+      const title=sheet[XLSX.utils.encode_cell({r:0,c:column})]||(sheet[XLSX.utils.encode_cell({r:0,c:column})]={t:"s",v:""});
+      title.s={fill:{fgColor:{rgb:"102F4D"}},font:{bold:true,color:{rgb:"FFFFFF"},sz:16},alignment:{horizontal:"center",vertical:"center"}};
+      const subtitle=sheet[XLSX.utils.encode_cell({r:1,c:column})]||(sheet[XLSX.utils.encode_cell({r:1,c:column})]={t:"s",v:""});
+      subtitle.s={fill:{fgColor:{rgb:"EAF0F5"}},font:{bold:true,color:{rgb:"102F4D"},sz:11},alignment:{horizontal:"center",vertical:"center"}};
+      const header=sheet[XLSX.utils.encode_cell({r:3,c:column})];
+      if(header)header.s={fill:{fgColor:{rgb:"F97316"}},font:{bold:true,color:{rgb:"FFFFFF"},sz:11},alignment:{horizontal:"center",vertical:"center",wrapText:true},border:thinBorder};
     }
-    summaryRows.forEach((row,rowIndex)=>row.forEach((_,column)=>{
-      const cell=summary[XLSX.utils.encode_cell({r:rowIndex+4,c:column})];if(!cell)return;
-      cell.s={alignment:{horizontal:column===0?"left":"center",vertical:"center"},border:{bottom:{style:"thin",color:{rgb:"E2E8F0"}}}};
-      if(column===headers.length-1)cell.z="0%";
-    }));
-
-    const reportStart=monthWeeks[0],reportEnd=moveDate(monthWeeks[monthWeeks.length-1],6);
-    const details=contacts.filter(contact=>contact.contact_date>=reportStart&&contact.contact_date<=reportEnd).map(contact=>[
-      institutionLabels[contact.institution_type],contact.institution_name,contact.contact_date,contact.sector,contact.contact_phone,contact.email,
-      contact.store_names.join(", "),contact.additional_comments,contact.submitted_by_name
-    ]);
-    const detailHeaders=["Tipo de institución","Nombre de la institución","Fecha","Sector","# Contacto","Correo","Tiendas donde consume","Comentarios adicionales","Supervisor"];
-    const detail=XLSX.utils.aoa_to_sheet([detailHeaders,...details]);
-    detail["!cols"]=[{wch:20},{wch:34},{wch:13},{wch:22},{wch:18},{wch:30},{wch:38},{wch:55},{wch:28}];
-    detail["!autofilter"]={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:Math.max(0,details.length),c:detailHeaders.length-1}})};
-    detailHeaders.forEach((_,column)=>{const cell=detail[XLSX.utils.encode_cell({r:0,c:column})];if(cell)cell.s={fill:{fgColor:{rgb:"102F4D"}},font:{bold:true,color:{rgb:"FFFFFF"}},alignment:{horizontal:"center",vertical:"center",wrapText:true}};});
-    details.forEach((row,rowIndex)=>row.forEach((_,column)=>{const cell=detail[XLSX.utils.encode_cell({r:rowIndex+1,c:column})];if(cell)cell.s={alignment:{vertical:"top",wrapText:true},border:{bottom:{style:"thin",color:{rgb:"E2E8F0"}}}};}));
-
+    selectedContacts.forEach((contact,rowIndex)=>{
+      for(let column=0;column<8;column++){
+        const cell=sheet[XLSX.utils.encode_cell({r:rowIndex+4,c:column})];if(!cell)continue;
+        cell.s={fill:{fgColor:{rgb:rowIndex%2===0?"FFFFFF":"F7F9FB"}},font:{color:{rgb:"26384A"}},alignment:{horizontal:column===2?"center":"left",vertical:"top",wrapText:true},border:thinBorder};
+        if(column===2)cell.z="dd/mm/yyyy";
+      }
+      const typeCell=sheet[XLSX.utils.encode_cell({r:rowIndex+4,c:0})];
+      const colors=categoryColors[contact.institution_type];
+      if(typeCell)typeCell.s={...typeCell.s,fill:{fgColor:{rgb:colors.fill}},font:{bold:true,color:{rgb:colors.font}},alignment:{horizontal:"center",vertical:"center"}};
+    });
     const workbook=XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook,summary,"Cumplimiento mensual");
-    XLSX.utils.book_append_sheet(workbook,detail,"Clientes registrados");
+    workbook.Props={Title:"Registro de clientes B2B",Subject:`Clientes del ${reportStart} al ${reportEnd}`,Company:"TIPTI Operaciones"};
+    XLSX.utils.book_append_sheet(workbook,sheet,"Clientes B2B");
     const bytes=XLSX.write(workbook,{bookType:"xlsx",type:"array"});
     const url=URL.createObjectURL(new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}));
-    const link=document.createElement("a");link.href=url;link.download=`Registro_Clientes_B2B_${selectedMonth}.xlsx`;document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);
-    setNotice("✓ Reporte mensual B2B descargado");
+    const link=document.createElement("a");link.href=url;link.download=`Clientes_B2B_${reportStart}_${reportEnd}.xlsx`;document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);
+    setNotice(`✓ Reporte generado con ${selectedContacts.length} cliente${selectedContacts.length===1?"":"s"}`);
   }
 
   return <section className="b2b-module">
@@ -195,7 +202,7 @@ export default function B2BClientRegistry({locations,currentUser,apiFetch,setNot
         <label>Sector *<input name="sector" defaultValue={editing?.sector||""} placeholder="Ej. Urdesa, Centro, Samborondón" maxLength={300} required/></label>
         <label># Contacto<input name="contactPhone" type="tel" defaultValue={editing?.contact_phone||""} placeholder="Ej. 099 000 0000" maxLength={80}/></label>
         <label>Correo<input name="email" type="email" defaultValue={editing?.email||""} placeholder="contacto@institucion.com" maxLength={320}/><small>Ingresa al menos teléfono o correo.</small></label>
-        <fieldset className="b2b-store-picker"><legend>Tiendas donde consume</legend><div>{locations.map(location=><label key={location.id}><input type="checkbox" checked={selectedStores.includes(location.name)} onChange={event=>setSelectedStores(values=>event.target.checked?[...values,location.name]:values.filter(name=>name!==location.name))}/><span>{location.name}<small>{location.city}</small></span></label>)}</div>{!locations.length&&<p>No existen tiendas disponibles para tu cuenta.</p>}</fieldset>
+        <label className="wide">Tiendas donde consume<input value={storesConsumed} onChange={event=>setStoresConsumed(event.target.value)} placeholder="Ej. Kiwy, Megamaxi, Ferreterías en general" maxLength={2000}/><small>Escribe libremente una o varias tiendas separadas por comas.</small></label>
         <label className="wide">Comentarios adicionales<textarea name="additionalComments" rows={4} defaultValue={editing?.additional_comments||""} maxLength={5000} placeholder="Escribe qué se conversó, necesidades del cliente y próximos pasos."/></label>
       </div>
       <div className="b2b-form-actions"><button type="button" className="secondary" onClick={closeForm}>Cancelar</button><button className="primary" disabled={saving}>{saving?"Guardando…":editing?"Guardar cambios":"Guardar cliente"}</button></div>
@@ -209,11 +216,17 @@ export default function B2BClientRegistry({locations,currentUser,apiFetch,setNot
     </div>
 
     <div className="b2b-monthly-card">
-      <div className="b2b-section-head b2b-month-head"><div><span>REPORTE POR SEMANAS</span><h3>Control mensual</h3><p>Todas las semanas que forman parte del mes seleccionado.</p></div><label>Mes<input type="month" value={selectedMonth} onChange={event=>{if(event.target.value)setSelectedMonth(event.target.value)}}/></label>{isAdmin&&<button type="button" className="secondary" onClick={downloadMonthlyReport}>⇩ Descargar reporte</button>}</div>
+      <div className="b2b-section-head b2b-month-head"><div><span>REPORTE POR SEMANAS</span><h3>Control mensual</h3><p>Todas las semanas que forman parte del mes seleccionado.</p></div><label>Mes<input type="month" value={selectedMonth} onChange={event=>{if(event.target.value)setSelectedMonth(event.target.value)}}/></label></div>
       <div className="table-wrap"><table className="b2b-month-table"><thead><tr><th>Supervisor</th>{monthWeeks.map(week=><th key={week}>{shortDate(week)}–{shortDate(moveDate(week,6))}</th>)}<th>Total</th><th>Cumplimiento</th></tr></thead><tbody>
         {monthlyRows.map(row=><tr key={row.id}><td><strong>{row.name}</strong></td>{row.counts.map((count,index)=><td key={monthWeeks[index]}><span className={monthWeeks[index]>currentWeek?"future":progressClass(count)}>{monthWeeks[index]>currentWeek?"No iniciada":`${count}/${WEEKLY_GOAL}`}</span></td>)}<td><strong>{row.total}</strong></td><td><b>{row.percentage}%</b><small>{row.completed}/{row.elapsed} semanas</small></td></tr>)}
       </tbody></table></div>
     </div>
+
+    {isAdmin&&<div className="b2b-report-card">
+      <div className="b2b-section-head"><div><span>REPORTE DE CLIENTES</span><h3>Generar Excel por fechas</h3><p>El archivo incluye únicamente la información de los clientes guardados en la base.</p></div></div>
+      <div className="b2b-report-controls"><label>Desde<input type="date" value={reportStart} max={reportEnd||undefined} onChange={event=>setReportStart(event.target.value)}/></label><label>Hasta<input type="date" value={reportEnd} min={reportStart||undefined} onChange={event=>setReportEnd(event.target.value)}/></label><button type="button" className="primary" onClick={downloadClientReport}>⇩ Generar Excel</button></div>
+      <small className="b2b-report-note">No contiene nombres de supervisores, correos internos ni datos de cumplimiento.</small>
+    </div>}
 
     <div className="b2b-records-card">
       <div className="b2b-section-head b2b-records-head"><div><span>HISTORIAL</span><h3>Clientes registrados</h3><p>{visibleContacts.length} registros visibles.</p></div><select aria-label="Filtrar por tipo" value={typeFilter} onChange={event=>setTypeFilter(event.target.value as InstitutionType|"all")}><option value="all">Todos los tipos</option>{institutionOptions.map(type=><option key={type} value={type}>{institutionLabels[type]}</option>)}</select><input aria-label="Buscar clientes B2B" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Buscar institución, sector o contacto"/><button type="button" className="secondary" onClick={openCreate}>＋ Nuevo registro</button></div>
