@@ -11,6 +11,7 @@ import Constancias from "./Constancias";
 import DashboardInsights from "./DashboardInsights";
 import RegionalProfitability from "./RegionalProfitability";
 import RegionalClients from "./RegionalClients";
+import B2BClientRegistry from "./B2BClientRegistry";
 
 type Shift = { time: string; role: string; tone: "blue" | "green" | "orange" | "yellow" };
 type Person = { id: number; name: string; location: string; initials: string; shifts: (Shift | null)[] };
@@ -41,9 +42,9 @@ const locations = [
 const shift = (time: string, role: string, tone: Shift["tone"]): Shift => ({ time, role, tone });
 const adminNav = [
   ["▦", "Panel general"], ["▣", "Horarios"], ["♙", "Supervisores"],
-  ["◫", "Turnos y roles"], ["♟", "Shoppers"], ["★", "Calificación administrador"], ["▧", "Constancias"], ["✓", "Cumplimiento semanal"], ["↗", "Rentabilidad ciudades"], ["♙", "Gestión de clientes"], ["$", "Autorizaciones"], ["⌂", "Locales"], ["▥", "Reportes"], ["⚿", "Accesos"]
+  ["◫", "Turnos y roles"], ["♟", "Shoppers"], ["★", "Calificación administrador"], ["▧", "Constancias"], ["✓", "Cumplimiento semanal"], ["↗", "Rentabilidad ciudades"], ["♙", "Gestión de clientes"], ["♧", "Registro clientes B2B"], ["$", "Autorizaciones"], ["⌂", "Locales"], ["▥", "Reportes"], ["⚿", "Accesos"]
 ];
-const supervisorNav = [["▣", "Horarios"],["◫", "Turnos y roles"],["♟", "Shoppers"],["★", "Calificación administrador"],["▧", "Constancias"],["✓", "Cumplimiento semanal"],["♙", "Gestión de clientes"],["$", "Autorizaciones"],["▥", "Reportes"]];
+const supervisorNav = [["▣", "Horarios"],["◫", "Turnos y roles"],["♟", "Shoppers"],["★", "Calificación administrador"],["▧", "Constancias"],["✓", "Cumplimiento semanal"],["♙", "Gestión de clientes"],["♧", "Registro clientes B2B"],["$", "Autorizaciones"],["▥", "Reportes"]];
 const navigationLabel = (label:string) => label === "Horarios" ? "Horario Supervisor" : label === "Shoppers" ? "Horario Shoppers" : label === "Reportes" ? "Asignación automática de compra" : label;
 const navigationMenuLabel = (label:string) => label === "Reportes" ? "Asignación de compra" : navigationLabel(label);
 const navigationIconPaths:Record<string,string[]> = {
@@ -57,6 +58,7 @@ const navigationIconPaths:Record<string,string[]> = {
   "Cumplimiento semanal":["M4 5h16v15H4z","M8 3v4M16 3v4M4 9h16","m8 14 2 2 5-5"],
   "Rentabilidad ciudades":["M4 20V10h4v10H4ZM10 20V4h4v16h-4ZM16 20V7h4v13h-4Z","m5 7 4-3 4 3 6-5"],
   "Gestión de clientes":["M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z","M2.5 21a6.5 6.5 0 0 1 13 0","M17 8h5M19.5 5.5v5"],
+  "Registro clientes B2B":["M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z","M2.5 20a5.5 5.5 0 0 1 11 0","M16 6h6M19 3v6","M15 14h7v6h-7z"],
   "Autorizaciones":["M6 3h12v18H6z","M9 7h6M9 11h6M9 15h3","m14 17 1.5 1.5L19 15"],
   "Locales":["M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z","M12 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"],
   "Reportes":["M4 20V10h4v10H4ZM10 20V4h4v16h-4ZM16 20V7h4v13h-4Z"],
@@ -1474,6 +1476,7 @@ export default function Home() {
         {active === "Cumplimiento semanal" && data && <WeeklyCompliance locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
         {active === "Rentabilidad ciudades" && isAdmin && data && <RegionalProfitability locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
         {active === "Gestión de clientes" && data && <RegionalClients locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
+        {active === "Registro clientes B2B" && data && <B2BClientRegistry locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
 
         {active === "Reportes" && <section className="management-card">
           <div className="management-head"><div><h2>Asignación automática de compra</h2><p>Genera la asignación automática de compra en Excel con ID, mes, día, horas y día libre.</p></div><button className="primary" onClick={downloadShopperReport}>⇩ Descargar asignación</button></div>
