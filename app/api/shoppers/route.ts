@@ -93,10 +93,13 @@ export async function POST(request:NextRequest){
   const db=auth.db,body=await request.json();
   if(body.action==="addStaff"){
     const shopperId=String(body.shopperId||"").trim();
-    const {error}=await db.from("shopper_staff").insert({name:String(body.name).trim(),shopper_external_id:shopperId||null,category:body.category,employment_type:body.employmentType,location_id:body.locationId});
+    const defaultRole=body.category==="delivery"?"Repartidor":"Asesor de compra";
+    const {error}=await db.from("shopper_staff").insert({name:String(body.name).trim(),shopper_external_id:shopperId||null,job_role:String(body.jobRole||defaultRole).trim(),category:body.category,employment_type:body.employmentType,location_id:body.locationId});
     if(error)return NextResponse.json({error:databaseError(error,"No se pudo agregar el shopper")},{status:400});
   }else if(body.action==="updateStaff"){
     const changes:Record<string,unknown>={name:String(body.name).trim(),shopper_external_id:String(body.shopperId||"").trim()||null};
+    if(body.jobRole)changes.job_role=String(body.jobRole).trim();
+    if(body.employmentType)changes.employment_type=String(body.employmentType).trim();
     if(body.locationId)changes.location_id=Number(body.locationId);
     const {error}=await db.from("shopper_staff").update(changes).eq("id",body.id);
     if(error)return NextResponse.json({error:databaseError(error,"No se pudo actualizar el shopper")},{status:400});
