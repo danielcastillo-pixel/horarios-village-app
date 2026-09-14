@@ -124,7 +124,7 @@ export async function POST(request:NextRequest) {
   else if(body.action==="addSupervisor"){
     const activeFrom=isDate(body.weekStart)?String(body.weekStart):"2026-07-27";
     result=await db.from("supervisors").insert({
-      name:String(body.name).trim(),location_id:body.locationId,active:true,active_from:activeFrom,active_until:null
+      name:String(body.name).trim(),job_role:String(body.jobRole||"Supervisor").trim(),location_id:body.locationId,active:true,active_from:activeFrom,active_until:null
     });
   }
   else if(body.action==="addRole") result=await db.from("roles").insert({name:String(body.name).trim(),color:body.color,counts_hours:!["Descanso","Libre","Vacaciones"].includes(String(body.name))});
@@ -136,6 +136,7 @@ export async function POST(request:NextRequest) {
   else if(body.action==="archiveRole") result=await db.from("roles").update({active:false}).eq("id",Number(body.id));
   else if(body.action==="updateSupervisor"){
     const changes:Record<string,unknown>={name:String(body.name).trim(),location_id:Number(body.locationId)};
+    if(body.jobRole)changes.job_role=String(body.jobRole).trim();
     if(body.active!==undefined)changes.active=Boolean(Number(body.active));
     result=await db.from("supervisors").update(changes).eq("id",body.id);
   }

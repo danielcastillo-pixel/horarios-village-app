@@ -12,17 +12,18 @@ import DashboardInsights from "./DashboardInsights";
 import RegionalProfitability from "./RegionalProfitability";
 import RegionalClients from "./RegionalClients";
 import B2BClientRegistry from "./B2BClientRegistry";
+import RegionalPersonnel from "./RegionalPersonnel";
 
 type Shift = { time: string; role: string; tone: "blue" | "green" | "orange" | "yellow" };
 type Person = { id: number; name: string; location: string; initials: string; shifts: (Shift | null)[] };
 type LocationRow = { id:number; name:string; city:string; active:number };
 type RoleRow = { id:number; name:string; color:Shift["tone"] | "purple"; active:number };
-type SupervisorRow = { id:number; name:string; location_id:number; location_name:string; city:string; active:number; active_from:string; active_until:string|null };
+type SupervisorRow = { id:number; name:string; job_role:string; location_id:number; location_name:string; city:string; active:number; active_from:string; active_until:string|null };
 type AssignmentRow = { id:number; supervisor_id:number; work_date:string; start_time:string|null; end_time:string|null; role_id:number; role_name:string; color:Shift["tone"]; hours:number };
 type CurrentUser = { email:string; name:string; role:"admin"|"supervisor"; locationId:number|null; locationIds:number[] };
 type DataSet = { locations:LocationRow[]; roles:RoleRow[]; supervisors:SupervisorRow[]; assignments:AssignmentRow[]; currentUser:CurrentUser };
 type AccessUserRow = { id:string; email:string; name:string; role:string; location_id:number; location_name:string; location_ids:number[]; location_names:string[]; requested_location_ids:number[]; requested_location_names:string[]; active:number };
-type ShopperRow={id:number;name:string;shopper_external_id:string|null;category:"purchase"|"delivery";employment_type:string;location_id:number;location_name:string;active:number};
+type ShopperRow={id:number;name:string;shopper_external_id:string|null;job_role:string;category:"purchase"|"delivery";employment_type:string;location_id:number;location_name:string;active:number};
 type ShopperTurnRow={id:number;staff_id:number;work_date:string;turn_code:string;shift_type_id:number|null};
 type ShopperShiftType={id:number;code:string;label:string;start_time:string|null;end_time:string|null;category:"purchase"|"delivery"|"both";location_id:number|null;counts_opening:boolean;counts_closing:boolean;is_free:boolean;created_by:string|null;is_general:boolean;active:boolean};
 type PresenceType="supervisor"|"purchase"|"delivery";
@@ -42,7 +43,7 @@ const locations = [
 const shift = (time: string, role: string, tone: Shift["tone"]): Shift => ({ time, role, tone });
 const adminNav = [
   ["▦", "Panel general"], ["▣", "Horarios"], ["♙", "Supervisores"],
-  ["◫", "Turnos y roles"], ["♟", "Shoppers"], ["★", "Calificación administrador"], ["▧", "Constancias"], ["✓", "Cumplimiento semanal"], ["↗", "Rentabilidad ciudades"], ["♙", "Gestión de clientes"], ["♧", "Registro clientes B2B"], ["$", "Autorizaciones"], ["⌂", "Locales"], ["▥", "Reportes"], ["⚿", "Accesos"]
+  ["◫", "Turnos y roles"], ["♟", "Shoppers"], ["♚", "Nómina regional"], ["★", "Calificación administrador"], ["▧", "Constancias"], ["✓", "Cumplimiento semanal"], ["↗", "Rentabilidad ciudades"], ["♙", "Gestión de clientes"], ["♧", "Registro clientes B2B"], ["$", "Autorizaciones"], ["⌂", "Locales"], ["▥", "Reportes"], ["⚿", "Accesos"]
 ];
 const supervisorNav = [["▣", "Horarios"],["◫", "Turnos y roles"],["♟", "Shoppers"],["★", "Calificación administrador"],["▧", "Constancias"],["✓", "Cumplimiento semanal"],["♙", "Gestión de clientes"],["♧", "Registro clientes B2B"],["$", "Autorizaciones"],["▥", "Reportes"]];
 const navigationLabel = (label:string) => label === "Horarios" ? "Horario Supervisor" : label === "Shoppers" ? "Horario Shoppers" : label === "Reportes" ? "Asignación automática de compra" : label;
@@ -53,6 +54,7 @@ const navigationIconPaths:Record<string,string[]> = {
   "Supervisores":["M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z","M4.5 21a7.5 7.5 0 0 1 15 0"],
   "Turnos y roles":["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z","M12 7v5l3 2"],
   "Shoppers":["M4 5h16v15H4z","M8 3v4M16 3v4M4 9h16","M8 13h8M8 17h5"],
+  "Nómina regional":["M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z","M2.5 20a5.5 5.5 0 0 1 11 0","M17 11a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z","M14 20a5 5 0 0 1 8 0"],
   "Calificación administrador":["m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9L6.6 20l1-6.1-4.4-4.3 6.1-.9L12 3Z"],
   "Constancias":["M5 3h14v18H5z","M8 7h8M8 11h8M8 15h5","m15 17 2 2 4-5"],
   "Cumplimiento semanal":["M4 5h16v15H4z","M8 3v4M16 3v4M4 9h16","m8 14 2 2 5-5"],
@@ -896,7 +898,7 @@ export default function Home() {
     const payload = create === "location"
       ? {action:"addLocation",name:form.get("name"),city:form.get("city")}
       : create === "supervisor"
-      ? {action:"addSupervisor",name:form.get("name"),locationId:Number(form.get("locationId")),weekStart}
+      ? {action:"addSupervisor",name:form.get("name"),jobRole:form.get("jobRole"),locationId:Number(form.get("locationId")),weekStart}
       : {action:"addRole",name:form.get("name"),color:form.get("color")};
     const response = await apiFetch("/api/data",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});
     if (response.ok) {
@@ -915,6 +917,7 @@ export default function Home() {
       action:"updateSupervisor",
       id:editSupervisor.id,
       name:String(form.get("name") ?? "").trim(),
+      jobRole:String(form.get("jobRole") ?? "Supervisor").trim(),
       locationId:Number(form.get("locationId"))
     })});
     if (response.ok) {
@@ -1020,7 +1023,7 @@ export default function Home() {
     const selected=data?.locations.find(l=>l.name===location)??data?.locations[0];
     if(!selected){setNotice("Selecciona un local");return;}
     const response=await apiFetch("/api/shoppers",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
-      action:"addStaff",name:form.get("name"),shopperId:form.get("shopperId"),employmentType:form.get("employmentType"),category:shopperCategory,locationId:selected.id
+      action:"addStaff",name:form.get("name"),shopperId:form.get("shopperId"),jobRole:form.get("jobRole"),employmentType:form.get("employmentType"),category:shopperCategory,locationId:selected.id
     })});
     const result=await response.json().catch(()=>({error:"No se pudo guardar"}));
     if(!response.ok){setNotice(`Error: ${result.error}`);return;}
@@ -1030,7 +1033,7 @@ export default function Home() {
   async function updateShopper(form:FormData){
     if(!editShopper)return;
     const response=await apiFetch("/api/shoppers",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
-      action:"updateStaff",id:editShopper.id,name:form.get("name"),shopperId:form.get("shopperId"),locationId:Number(form.get("locationId"))
+      action:"updateStaff",id:editShopper.id,name:form.get("name"),shopperId:form.get("shopperId"),jobRole:form.get("jobRole"),employmentType:form.get("employmentType"),locationId:Number(form.get("locationId"))
     })});
     const result=await response.json().catch(()=>({error:"No se pudo guardar"}));
     if(!response.ok){setNotice(`Error: ${result.error}`);return;}
@@ -1407,7 +1410,7 @@ export default function Home() {
 
         {active==="Panel general"&&isAdmin&&data&&<DashboardInsights locations={data.locations} apiFetch={apiFetch} setNotice={setNotice} onNavigate={section=>setActive(section)} />}
 
-        {!['Panel general','Calificación administrador','Constancias','Autorizaciones','Cumplimiento semanal','Rentabilidad ciudades','Gestión de clientes'].includes(active)&&<section className="kpis">
+        {!['Panel general','Nómina regional','Calificación administrador','Constancias','Autorizaciones','Cumplimiento semanal','Rentabilidad ciudades','Gestión de clientes'].includes(active)&&<section className="kpis">
           <article><span>Supervisores activos</span><strong>{data?.supervisors.filter(s=>s.active===1).length ?? people.length}</strong><small className="ok">● Nómina disponible</small></article>
           <article><span>Horas planificadas</span><strong>{displayHours(people.reduce((n,p) => n + hoursFor(p),0))} h</strong><small>Calculadas según cada rango</small></article>
           <article><span>Cobertura semanal</span><strong>96%</strong><div className="progress"><i /></div></article>
@@ -1451,7 +1454,7 @@ export default function Home() {
           })()}</>:<div className="shopper-directory">
             <div className="directory-heading"><div><h2>Repositorio de shoppers</h2><p>Busca por ID o nombre y administra el local asignado.</p></div><span>{shopperDirectory.length} registros</span></div>
             <label className="shopper-id-search"><span>⌕</span><input value={shopperDirectoryQuery} onChange={event=>setShopperDirectoryQuery(event.target.value)} placeholder="Buscar por ID de shopper o nombre…" /></label>
-            <div className="shopper-directory-list">{shopperDirectory.filter(person=>{const term=shopperDirectoryQuery.trim().toLowerCase();return !term||person.name.toLowerCase().includes(term)||String(person.shopper_external_id||"").toLowerCase().includes(term)}).map(person=><article key={person.id}><span className="directory-avatar">{person.name.split(" ").map(part=>part[0]).join("").slice(0,2).toUpperCase()}</span><div className="directory-person"><strong>{person.name}</strong><span>{person.category==="purchase"?"Asesor de compra":"Repartidor"} · {person.employment_type}</span></div><div className="directory-id"><small>ID SHOPPER</small><strong>{person.shopper_external_id||"Sin ID"}</strong></div><div className="directory-location"><small>LOCAL ACTUAL</small><strong>{person.location_name}</strong></div><span className={person.active===1?"directory-status active":"directory-status archived"}>{person.active===1?"Activo":"Archivado"}</span><button className="directory-edit" onClick={()=>setEditShopper(person)}>✎ Cambiar local</button></article>)}</div>
+            <div className="shopper-directory-list">{shopperDirectory.filter(person=>{const term=shopperDirectoryQuery.trim().toLowerCase();return !term||person.name.toLowerCase().includes(term)||String(person.shopper_external_id||"").toLowerCase().includes(term)}).map(person=><article key={person.id}><span className="directory-avatar">{person.name.split(" ").map(part=>part[0]).join("").slice(0,2).toUpperCase()}</span><div className="directory-person"><strong>{person.name}</strong><span>{person.job_role||(person.category==="purchase"?"Asesor de compra":"Repartidor")} · {person.employment_type}</span></div><div className="directory-id"><small>ID SHOPPER</small><strong>{person.shopper_external_id||"Sin ID"}</strong></div><div className="directory-location"><small>LOCAL ACTUAL</small><strong>{person.location_name}</strong></div><span className={person.active===1?"directory-status active":"directory-status archived"}>{person.active===1?"Activo":"Archivado"}</span><button className="directory-edit" onClick={()=>setEditShopper(person)}>✎ Actualizar</button></article>)}</div>
           </div>}
         </section>}
 
@@ -1477,6 +1480,7 @@ export default function Home() {
         {active === "Rentabilidad ciudades" && isAdmin && data && <RegionalProfitability locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
         {active === "Gestión de clientes" && data && <RegionalClients locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
         {active === "Registro clientes B2B" && data && <B2BClientRegistry locations={data.locations} currentUser={data.currentUser} apiFetch={apiFetch} setNotice={setNotice} />}
+        {active === "Nómina regional" && isAdmin && data && <RegionalPersonnel locations={data.locations} apiFetch={apiFetch} setNotice={setNotice} />}
 
         {active === "Reportes" && <section className="management-card">
           <div className="management-head"><div><h2>Asignación automática de compra</h2><p>Genera la asignación automática de compra en Excel con ID, mes, día, horas y día libre.</p></div><button className="primary" onClick={downloadShopperReport}>⇩ Descargar asignación</button></div>
@@ -1520,8 +1524,8 @@ export default function Home() {
 
       {notice && <button className="toast" onClick={() => setNotice("")}>{notice} ×</button>}
       {shopperImageChoice&&<div className="modal-backdrop" onMouseDown={()=>setShopperImageChoice(false)}><div className="modal image-choice-modal" role="dialog" aria-modal="true" aria-labelledby="image-choice-title" onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" onClick={()=>setShopperImageChoice(false)}>×</button><span className="modal-kicker">DESCARGAR HORARIO</span><h2 id="image-choice-title">¿Cómo quieres generar la imagen?</h2><p>Elige una sola imagen horizontal o divide los equipos grandes en dos archivos legibles.</p><div className="image-choice-grid"><button type="button" onClick={()=>void downloadShopperImage(1)}><span>▭</span><strong>Una imagen</strong><small>Todo el equipo en una tabla horizontal compacta.</small></button><button type="button" onClick={()=>void downloadShopperImage(2)}><span>▭ ▭</span><strong>Dos imágenes</strong><small>Divide el equipo en dos partes equilibradas.</small></button></div></div></div>}
-      {addShopper&&<div className="modal-backdrop" onMouseDown={()=>setAddShopper(false)}><form className="modal" onSubmit={e=>{e.preventDefault();void createShopper(new FormData(e.currentTarget));}} onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" onClick={()=>setAddShopper(false)}>×</button><span className="modal-kicker">AGREGAR FILA</span><h2>{shopperCategory==="purchase"?"Nuevo asesor de compra":"Nuevo repartidor"}</h2><p>Se agregará al local seleccionado en el horario.</p><label>Nombre completo<input name="name" required /></label><label>ID de shopper<input name="shopperId" inputMode="numeric" required placeholder="Ej. 1692" /></label><label>Tipo<select name="employmentType"><option>Interno</option><option>Externo</option><option>Full service</option>{shopperCategory==="purchase"&&<option>Shopper cobrador</option>}</select></label><button className="primary save">Guardar</button></form></div>}
-      {editShopper&&<div className="modal-backdrop" onMouseDown={()=>setEditShopper(null)}><form className="modal" onSubmit={e=>{e.preventDefault();void updateShopper(new FormData(e.currentTarget));}} onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" onClick={()=>setEditShopper(null)}>×</button><span className="modal-kicker">DATOS INTERNOS</span><h2>{editShopper.name}</h2><p>El ID aparece de forma compacta junto a sus datos y también se conserva en el reporte.</p><label>Nombre completo<input name="name" required defaultValue={editShopper.name} /></label><label>ID de shopper<input name="shopperId" inputMode="numeric" required defaultValue={editShopper.shopper_external_id||""} /></label><label>Local asignado<select name="locationId" required defaultValue={editShopper.location_id}>{data?.locations.map(item=><option key={item.id} value={item.id}>{item.name} · {item.city}</option>)}</select></label><button className="primary save">Guardar cambios</button></form></div>}
+      {addShopper&&<div className="modal-backdrop" onMouseDown={()=>setAddShopper(false)}><form className="modal" onSubmit={e=>{e.preventDefault();void createShopper(new FormData(e.currentTarget));}} onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" onClick={()=>setAddShopper(false)}>×</button><span className="modal-kicker">AGREGAR FILA</span><h2>{shopperCategory==="purchase"?"Nuevo asesor de compra":"Nuevo repartidor"}</h2><p>Se agregará al horario y a la nómina regional.</p><label>Nombre completo<input name="name" required /></label><label>ID de shopper<input name="shopperId" inputMode="numeric" required placeholder="Ej. 1692" /></label><label>Cargo<input name="jobRole" required defaultValue={shopperCategory==="purchase"?"Asesor de compra":"Repartidor"}/></label><label>Tipo<select name="employmentType"><option>Interno</option><option>Externo</option><option>Full service</option>{shopperCategory==="purchase"&&<option>Shopper cobrador</option>}</select></label><button className="primary save">Guardar</button></form></div>}
+      {editShopper&&<div className="modal-backdrop" onMouseDown={()=>setEditShopper(null)}><form className="modal" onSubmit={e=>{e.preventDefault();void updateShopper(new FormData(e.currentTarget));}} onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" onClick={()=>setEditShopper(null)}>×</button><span className="modal-kicker">DATOS INTERNOS</span><h2>{editShopper.name}</h2><p>Estos datos alimentan el horario y la nómina regional.</p><label>Nombre completo<input name="name" required defaultValue={editShopper.name} /></label><label>ID de shopper<input name="shopperId" inputMode="numeric" required defaultValue={editShopper.shopper_external_id||""} /></label><label>Cargo<input name="jobRole" required defaultValue={editShopper.job_role||(editShopper.category==="purchase"?"Asesor de compra":"Repartidor")}/></label><label>Tipo<select name="employmentType" defaultValue={editShopper.employment_type}><option>Interno</option><option>Externo</option><option>Full service</option>{editShopper.category==="purchase"&&<option>Shopper cobrador</option>}</select></label><label>Local asignado<select name="locationId" required defaultValue={editShopper.location_id}>{data?.locations.map(item=><option key={item.id} value={item.id}>{item.name} · {item.city}</option>)}</select></label><button className="primary save">Guardar cambios</button></form></div>}
       {deleteShopper&&<div className="modal-backdrop" onMouseDown={()=>!deletingShopper&&setDeleteShopper(null)}><div className="modal confirm-delete-modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-shopper-title" onMouseDown={e=>e.stopPropagation()}><button type="button" className="close" disabled={deletingShopper} onClick={()=>setDeleteShopper(null)}>×</button><span className="delete-warning-icon">!</span><span className="modal-kicker">ELIMINAR DEL HORARIO</span><h2 id="delete-shopper-title">¿Eliminar a {deleteShopper.name}?</h2><p>¿Estás seguro de que quieres eliminar a este shopper del horario? Se eliminará toda su fila y los turnos asignados. Esta acción no elimina usuarios de acceso ni otros locales.</p><div className="confirm-actions"><button type="button" className="secondary" disabled={deletingShopper} onClick={()=>setDeleteShopper(null)}>Cancelar</button><button type="button" className="danger-button" disabled={deletingShopper} onClick={()=>void confirmDeleteShopper()}>{deletingShopper?"Eliminando…":"Sí, eliminar shopper"}</button></div></div></div>}
       {(addShopperShift||editShopperShift)&&<div className="modal-backdrop" onMouseDown={()=>{setAddShopperShift(false);setEditShopperShift(null)}}><form className="modal shift-type-editor" onSubmit={e=>{e.preventDefault();void createShopperShift(new FormData(e.currentTarget));}} onMouseDown={e=>e.stopPropagation()}>
         <button type="button" className="close" onClick={()=>{setAddShopperShift(false);setEditShopperShift(null)}}>×</button>
@@ -1566,7 +1570,7 @@ export default function Home() {
         <span className="modal-kicker">NUEVO REGISTRO</span><h2>{create === "location" ? "Agregar local" : create === "supervisor" ? "Agregar supervisor" : "Crear rol"}</h2><p>La información quedará almacenada permanentemente.</p>
         <label>Nombre<input name="name" required placeholder={create === "location" ? "Ej. MX. Nuevo local" : create === "supervisor" ? "Nombre completo" : "Ej. Apertura"} /></label>
         {create === "location" && <label>Ciudad<input name="city" required placeholder="Ciudad" /></label>}
-        {create === "supervisor" && <label>Local<select name="locationId" required defaultValue={data?.locations.find(l=>l.name===location)?.id}>{data?.locations.map(l=><option key={l.id} value={l.id}>{l.name} · {l.city}</option>)}</select></label>}
+        {create === "supervisor" && <><label>Cargo<input name="jobRole" required defaultValue="Supervisor" /></label><label>Local<select name="locationId" required defaultValue={data?.locations.find(l=>l.name===location)?.id}>{data?.locations.map(l=><option key={l.id} value={l.id}>{l.name} · {l.city}</option>)}</select></label></>}
         {create === "role" && <label>Color<select name="color"><option value="blue">Azul</option><option value="green">Verde</option><option value="orange">Naranja</option><option value="yellow">Amarillo</option><option value="purple">Morado</option></select></label>}
         <button className="primary save">Guardar</button>
       </form></div>}
@@ -1575,6 +1579,7 @@ export default function Home() {
         <button type="button" className="close" onClick={() => setEditSupervisor(null)}>×</button>
         <span className="modal-kicker">EDITAR SUPERVISOR</span><h2>{editSupervisor.name}</h2><p>Los cambios conservarán todo su historial de horarios.</p>
         <label>Nombre completo<input name="name" required defaultValue={editSupervisor.name} /></label>
+        <label>Cargo<input name="jobRole" required defaultValue={editSupervisor.job_role||"Supervisor"} /></label>
         <label>Local asignado<select name="locationId" required defaultValue={editSupervisor.location_id}>{data?.locations.map(l=><option key={l.id} value={l.id}>{l.name} · {l.city}</option>)}</select></label>
         <button className="primary save">Guardar cambios</button>
       </form></div>}
